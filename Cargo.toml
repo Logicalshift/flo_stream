@@ -3,7 +3,7 @@ name            = "flo_stream"
 version         = "0.1.1"
 authors         = ["Andrew Hunter"]
 license         = "Apache-2.0"
-repository      = "https://github.com/Logicalshift/flowbetween"
+repository      = "https://github.com/Logicalshift/flo_stream"
 
 description     = "Pubsub and related streams for Rust futures"
 documentation   = "http://docs.rs/flo_stream/"

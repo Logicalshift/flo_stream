@@ -34,7 +34,7 @@ impl<Message: Clone> Publisher<Message> {
 
         // Build the publisher itself
         Publisher {
-            core:               Arc::new(Mutex::new(core))
+            core:   Arc::new(Mutex::new(core))
         }
     }
 
@@ -43,6 +43,15 @@ impl<Message: Clone> Publisher<Message> {
     /// 
     pub fn count_subscribers(&self) -> usize {
         self.core.lock().unwrap().subscribers.len()
+    }
+
+    ///
+    /// Creates a duplicate publisher that can be used to publish to the same streams as this object
+    /// 
+    pub fn republish(&self) -> Self {
+        Publisher {
+            core:   Arc::clone(&self.core)
+        }
     }
 }
 

@@ -32,6 +32,71 @@ impl<Message> Subscriber<Message> {
     }
 }
 
+impl<Message: Clone> Subscriber<Message> {
+    ///
+    /// Resubscribes to the same publisher as this stream.
+    /// 
+    /// The new subscriber will receive any future messages that are also  destined for this stream, but will not
+    /// receive any past messages.
+    /// 
+    pub fn resubscribe(&self) -> Self {
+        let pub_core = self.pub_core.upgrade();
+
+        if let Some(pub_core) = pub_core {
+            let new_sub_core = {
+                // Lock the cores
+                let mut pub_core    = pub_core.lock().unwrap();
+                let sub_core        = self.sub_core.lock().unwrap();
+
+                // Assign an ID
+                let new_id = pub_core.next_subscriber_id;
+                pub_core.next_subscriber_id += 1;
+
+                // Generate a new core for the clone
+                let new_sub_core = SubCore {
+                    id:                 new_id,
+                    published:          true,
+                    waiting:            sub_core.waiting.clone(),
+                    notify_waiting:     None,
+                    notify_ready:       None,
+                    notify_complete:    None
+                };
+                let new_sub_core = Arc::new(Mutex::new(new_sub_core));
+
+                // Store in the publisher core
+                pub_core.subscribers.insert(new_id, Arc::clone(&new_sub_core));
+
+                new_sub_core
+            };
+
+            // Create the new subscriber
+            Subscriber {
+                pub_core: Arc::downgrade(&pub_core),
+                sub_core: new_sub_core
+            }
+        } else {
+            // Publisher has gone away
+            let sub_core = self.sub_core.lock().unwrap();
+
+            // Create the new core (no publisher)
+            let new_sub_core = SubCore {
+                id:                 0,
+                published:          false,
+                waiting:            sub_core.waiting.clone(),
+                notify_waiting:     None,
+                notify_ready:       None,
+                notify_complete:    None
+            };
+
+            // Generate a new subscriber with this core
+            Subscriber {
+                pub_core: Weak::new(),
+                sub_core: Arc::new(Mutex::new(new_sub_core))
+            }
+        }
+    }
+}
+
 impl<Message> Drop for Subscriber<Message> {
     fn drop(&mut self) {
         let (notify_ready, notify_complete) = {
@@ -109,59 +174,8 @@ impl<Message> Stream for Subscriber<Message> {
 /// 
 impl<Message: Clone> Clone for Subscriber<Message> {
     fn clone(&self) -> Subscriber<Message> {
-        let pub_core = self.pub_core.upgrade();
-
-        if let Some(pub_core) = pub_core {
-            let new_sub_core = {
-                // Lock the cores
-                let mut pub_core    = pub_core.lock().unwrap();
-                let sub_core        = self.sub_core.lock().unwrap();
-
-                // Assign an ID
-                let new_id = pub_core.next_subscriber_id;
-                pub_core.next_subscriber_id += 1;
-
-                // Generate a new core for the clone
-                let new_sub_core = SubCore {
-                    id:                 new_id,
-                    published:          true,
-                    waiting:            sub_core.waiting.clone(),
-                    notify_waiting:     None,
-                    notify_ready:       None,
-                    notify_complete:    None
-                };
-                let new_sub_core = Arc::new(Mutex::new(new_sub_core));
-
-                // Store in the publisher core
-                pub_core.subscribers.insert(new_id, Arc::clone(&new_sub_core));
-
-                new_sub_core
-            };
-
-            // Create the new subscriber
-            Subscriber {
-                pub_core: Arc::downgrade(&pub_core),
-                sub_core: new_sub_core
-            }
-        } else {
-            // Publisher has gone away
-            let sub_core = self.sub_core.lock().unwrap();
-
-            // Create the new core (no publisher)
-            let new_sub_core = SubCore {
-                id:                 0,
-                published:          false,
-                waiting:            sub_core.waiting.clone(),
-                notify_waiting:     None,
-                notify_ready:       None,
-                notify_complete:    None
-            };
-
-            // Generate a new subscriber with this core
-            Subscriber {
-                pub_core: Weak::new(),
-                sub_core: Arc::new(Mutex::new(new_sub_core))
-            }
-        }
+        // TODO: 'clone' is perhaps not right as we don't reproduce the stream in its entirety. Remove this in future versions.
+        // 'resubscribe' is a better description of what is happening here.
+        self.resubscribe()
     }
 }

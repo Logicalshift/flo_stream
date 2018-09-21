@@ -159,7 +159,12 @@ impl<Message> Stream for Subscriber<Message> {
             } else {
                 // If the publisher is still alive and there are no messages available, store notification and carry on
                 sub_core.notify_waiting.push(task::current());
-                (Ok(Async::NotReady), vec![], vec![])
+
+                // If anything is waiting for this subscriber to become ready, make sure it's notified
+                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>();
+
+                (Ok(Async::NotReady), notify_ready, notify_complete)
             }
         };
 

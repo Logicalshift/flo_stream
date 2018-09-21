@@ -31,14 +31,14 @@ pub (crate) struct SubCore<Message> {
     /// Messages ready to be sent to this core
     pub waiting: VecDeque<Message>,
 
-    /// Notification task for when the 'waiting' queue becomes non-empty
-    pub notify_waiting: Option<Task>,
+    /// Notification tasks for when the 'waiting' queue becomes non-empty
+    pub notify_waiting: Vec<Task>,
 
     /// If the publisher is waiting on this subscriber, this is the notification to send
-    pub notify_ready: Option<Task>,
+    pub notify_ready: Vec<Task>,
 
     /// If the publisher is waiting for this subscriber to complete, this is the notification to send
-    pub notify_complete: Option<Task>
+    pub notify_complete: Vec<Task>
 }
 
 impl<Message: Clone> PubCore<Message> {
@@ -59,13 +59,10 @@ impl<Message: Clone> PubCore<Message> {
         for mut subscriber in subscribers.iter_mut() {
             if subscriber.waiting.len() >= max_queue_size {
                 // This subscriber needs to notify us when it's ready
-                subscriber.notify_ready = Some(task::current());
+                subscriber.notify_ready.push(task::current());
 
                 // Not ready
                 ready = false;
-            } else {
-                // This subscriber is already ready and doesn't need to notify us any more
-                subscriber.notify_ready = None;
             }
         }
 
@@ -78,7 +75,7 @@ impl<Message: Clone> PubCore<Message> {
 
             // Claim all of the notifications
             let notifications = subscribers.iter_mut()
-                .filter_map(|subscriber| subscriber.notify_waiting.take())
+                .flat_map(|subscriber| subscriber.notify_waiting.drain(..))
                 .collect::<Vec<_>>();
 
             // Result is the notifications to fire
@@ -116,13 +113,10 @@ impl<Message> PubCore<Message> {
         for mut subscriber in subscribers.iter_mut() {
             if subscriber.waiting.len() >= max_queue_size {
                 // This subscriber needs to notify us when it's ready
-                subscriber.notify_ready = Some(task::current());
+                subscriber.notify_ready.push(task::current());
 
                 // Not ready (we can't publish the message)
                 ready = false;
-            } else {
-                // This subscriber is already ready and doesn't need to notify us any more
-                subscriber.notify_ready = None;
             }
         }
 
@@ -132,16 +126,16 @@ impl<Message> PubCore<Message> {
         } else {
             // Try to find an idle subscriber (one where notify_waiting has a value, or which has more than one free slot in the queue)
             if let Some(idle_subscriber) = subscribers.iter_mut()
-                .filter(|subscriber| subscriber.notify_waiting.is_some() || subscriber.waiting.len() < max_queue_size-1)
+                .filter(|subscriber| subscriber.notify_waiting.len() > 0 || subscriber.waiting.len() < max_queue_size-1)
                 .nth(0) {
                 // Found an idle subscriber to notify
-                let notify = idle_subscriber.notify_waiting.take();
+                let notify = idle_subscriber.notify_waiting.drain(..).collect();
 
                 // Send the message to this subscriber alone
                 idle_subscriber.waiting.push_back(message);
 
                 // Caller should notify the subscriber that new data is available
-                PublishSingleOutcome::Published(notify.into_iter().collect())
+                PublishSingleOutcome::Published(notify)
             } else {
                 // No idle subscribers. All subscribers should notify us when they're ready
                 // Message was not published
@@ -169,10 +163,7 @@ impl<Message> PubCore<Message> {
                 complete = false;
 
                 // This subscriber needs to notify this task when it becomes ready
-                subscriber.notify_complete = Some(task::current());
-            } else {
-                // This subscriber doesn't need to notify anyone when it becomes ready
-                subscriber.notify_complete = None;
+                subscriber.notify_complete.push(task::current());
             }
         }
 

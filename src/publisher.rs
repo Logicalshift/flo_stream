@@ -76,9 +76,9 @@ impl<Message: Clone> PublisherSink<Message> for Publisher<Message> {
             id:                 subscriber_id,
             published:          true,
             waiting:            VecDeque::new(),
-            notify_waiting:     None,
-            notify_ready:       None,
-            notify_complete:    None
+            notify_waiting:     vec![],
+            notify_ready:       vec![],
+            notify_complete:    vec![]
         };
 
         // The new subscriber needs a reference to the sub_core and the pub_core
@@ -110,10 +110,10 @@ impl<Message> Drop for Publisher<Message> {
 
                 // Unpublish the subscriber (so that it hits the end of the stream)
                 subscriber.published    = false;
-                subscriber.notify_ready = None;
+                subscriber.notify_ready = vec![];
 
                 // Add to the things to notify once the lock is released
-                to_notify.push(subscriber.notify_waiting.take());
+                to_notify.extend(subscriber.notify_waiting.drain(..));
             }
 
             // Return the notifications outside of the lock
@@ -121,7 +121,7 @@ impl<Message> Drop for Publisher<Message> {
         };
 
         // Notify any subscribers that are waiting that we're unpublished
-        to_notify.into_iter().filter_map(|notify| notify).for_each(|notify| notify.notify());
+        to_notify.into_iter().for_each(|notify| notify.notify());
     }
 }
 

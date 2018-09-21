@@ -57,9 +57,9 @@ impl<Message: Clone> Subscriber<Message> {
                     id:                 new_id,
                     published:          true,
                     waiting:            sub_core.waiting.clone(),
-                    notify_waiting:     None,
-                    notify_ready:       None,
-                    notify_complete:    None
+                    notify_waiting:     vec![],
+                    notify_ready:       vec![],
+                    notify_complete:    vec![]
                 };
                 let new_sub_core = Arc::new(Mutex::new(new_sub_core));
 
@@ -83,9 +83,9 @@ impl<Message: Clone> Subscriber<Message> {
                 id:                 0,
                 published:          false,
                 waiting:            sub_core.waiting.clone(),
-                notify_waiting:     None,
-                notify_ready:       None,
-                notify_complete:    None
+                notify_waiting:     vec![],
+                notify_ready:       vec![],
+                notify_complete:    vec![]
             };
 
             // Generate a new subscriber with this core
@@ -112,17 +112,21 @@ impl<Message> Drop for Subscriber<Message> {
                 pub_core.subscribers.remove(&sub_core.id);
 
                 // Need to notify the core if it's waiting on this subscriber (might now be unblocked)
-                (sub_core.notify_ready.take(), sub_core.notify_complete.take())
+                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>(); 
+                (notify_ready, notify_complete)
             } else {
                 // Need to notify the core if it's waiting on this subscriber (might now be unblocked)
                 let mut sub_core = self.sub_core.lock().unwrap();
-                (sub_core.notify_ready.take(), sub_core.notify_complete.take())
+                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>(); 
+                (notify_ready, notify_complete)
             }
         };
 
         // After releasing the locks, notify the publisher if it's waiting on this subscriber
-        notify_ready.map(|notify| notify.notify());
-        notify_complete.map(|notify| notify.notify());
+        notify_ready.into_iter().for_each(|notify| notify.notify());
+        notify_complete.into_iter().for_each(|notify| notify.notify());
     }
 }
 
@@ -139,29 +143,29 @@ impl<Message> Stream for Subscriber<Message> {
             if let Some(next_message) = next_message {
                 // If the core is empty and we have a 'complete' notification, then send that
                 let notify_complete = if sub_core.waiting.len() == 0 {
-                    sub_core.notify_complete.take()
+                    sub_core.notify_complete.drain(..).collect::<Vec<_>>()
                 } else {
-                    None
+                    vec![]
                 };
 
                 // If something is waiting for this subscriber to become ready, then notify it as well
-                let notify_ready = sub_core.notify_ready.take();
+                let notify_ready = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
 
                 // Return the next message if it's available
                 (Ok(Async::Ready(Some(next_message))), notify_ready, notify_complete)
             } else if !sub_core.published {
                 // Stream has finished if the publisher core is no longer available
-                (Ok(Async::Ready(None)), None, None)
+                (Ok(Async::Ready(None)), vec![], vec![])
             } else {
                 // If the publisher is still alive and there are no messages available, store notification and carry on
-                sub_core.notify_waiting = Some(task::current());
-                (Ok(Async::NotReady), None, None)
+                sub_core.notify_waiting.push(task::current());
+                (Ok(Async::NotReady), vec![], vec![])
             }
         };
 
         // If there's something to notify as a result of this request, do so (note that we do this after releasing the core lock)
-        notify_ready.map(|ready| ready.notify());
-        notify_complete.map(|complete| complete.notify());
+        notify_ready.into_iter().for_each(|ready| ready.notify());
+        notify_complete.into_iter().for_each(|complete| complete.notify());
 
         // Return the result
         result

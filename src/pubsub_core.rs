@@ -111,26 +111,13 @@ impl<Message> PubCore<Message> {
             .map(|subscriber| subscriber.lock().unwrap())
             .collect::<Vec<_>>();
 
-        // All subscribers must have enough space (we do not queue the message if any subscribe cannot accept it)
-        let mut ready = true;
-        for mut subscriber in subscribers.iter_mut() {
-            if subscriber.waiting.len() >= max_queue_size {
-                // This subscriber needs to notify us when it's ready
-                subscriber.notify_ready.push(task::current());
+        // Try to find an idle subscriber (one where notify_waiting has a value, or which has more than one free slot in the queue)
+        {
+            let idle_subscriber = subscribers.iter_mut()
+            .filter(|subscriber| subscriber.notify_waiting.len() > 0 || subscriber.waiting.len() < max_queue_size-1)
+            .nth(0);
 
-                // Not ready (we can't publish the message)
-                ready = false;
-            }
-        }
-
-        if !ready {
-            // At least one subscriber has a full queue
-            PublishSingleOutcome::NotPublished(message)
-        } else {
-            // Try to find an idle subscriber (one where notify_waiting has a value, or which has more than one free slot in the queue)
-            if let Some(idle_subscriber) = subscribers.iter_mut()
-                .filter(|subscriber| subscriber.notify_waiting.len() > 0 || subscriber.waiting.len() < max_queue_size-1)
-                .nth(0) {
+            if let Some(idle_subscriber) = idle_subscriber  {
                 // Found an idle subscriber to notify
                 let notify = idle_subscriber.notify_waiting.drain(..).collect();
 
@@ -138,13 +125,16 @@ impl<Message> PubCore<Message> {
                 idle_subscriber.waiting.push_back(message);
 
                 // Caller should notify the subscriber that new data is available
-                PublishSingleOutcome::Published(notify)
-            } else {
-                // No idle subscribers. All subscribers should notify us when they're ready
-                // Message was not published
-                PublishSingleOutcome::NotPublished(message)
+                return PublishSingleOutcome::Published(notify);
             }
         }
+
+        // No idle subscribers. All subscribers should notify us when they're ready
+        subscribers.iter_mut()
+            .for_each(|subscriber| subscriber.notify_ready.push(task::current()));
+
+        // Message was not published
+        PublishSingleOutcome::NotPublished(message)
     }
 
     ///

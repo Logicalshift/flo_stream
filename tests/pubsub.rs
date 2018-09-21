@@ -7,6 +7,9 @@ use futures::*;
 use futures::executor;
 use futures::executor::{Notify, NotifyHandle};
 
+use std::thread;
+use std::sync::mpsc::channel;
+
 #[derive(Clone)]
 struct NotifyNothing;
 
@@ -253,20 +256,35 @@ fn single_receive_on_one_subscriber() {
 
 #[test]
 fn single_receive_on_two_subscribers() {
+    let (result_tx, result_rx) = channel();
+
     let mut publisher   = SinglePublisher::new(1);
     let subscriber1     = publisher.subscribe();
     let subscriber2     = publisher.subscribe();
 
     let mut publisher   = executor::spawn(publisher);
-    let mut subscriber1 = executor::spawn(subscriber1);
-    let mut subscriber2 = executor::spawn(subscriber2);
+
+    // Subscribers will block us if there's nothing listening, so spawn two threads to receive data
+    let result = result_tx.clone();
+    thread::spawn(move || {
+        let mut subscriber1 = executor::spawn(subscriber1);
+        result.send(subscriber1.wait_stream()).unwrap();
+    });
+
+    let result = result_tx.clone();
+    thread::spawn(move || {
+        let mut subscriber2 = executor::spawn(subscriber2);
+        result.send(subscriber2.wait_stream()).unwrap();
+    });
 
     publisher.wait_send(1).unwrap();
     publisher.wait_send(2).unwrap();
 
-    let msg1 = subscriber1.wait_stream();
-    let msg2 = subscriber2.wait_stream();
+    // Read the results from the threads (they're unordered, but as each thread only reads a single value we'll see if it gets sent to multiple places)
+    let msg1 = result_rx.recv().unwrap();
+    let msg2 = result_rx.recv().unwrap();
 
+    // Should be 1, 2 in either order
     assert!(msg1 == Some(Ok(1)) || msg1 == Some(Ok(2)));
 
     if msg1 == Some(Ok(1)) {

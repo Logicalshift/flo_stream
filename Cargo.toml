@@ -13,3 +13,7 @@ categories      = ["concurrency","asynchronous","algorithms","data-structures"]
 
 [dependencies]
 futures = "0.1"
+
+[dev-dependencies]
+desync  = "0.2"
+tokio   = "0.1"

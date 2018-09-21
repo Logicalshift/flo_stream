@@ -26,6 +26,7 @@ impl<Message> SinglePublisher<Message> {
         // Create the core
         let core = PubCore {
             next_subscriber_id: 0,
+            publisher_count:    1,
             subscribers:        HashMap::new(),
             max_queue_size:     buffer_size
         };
@@ -47,6 +48,8 @@ impl<Message> SinglePublisher<Message> {
     /// Creates a duplicate publisher that can be used to publish to the same streams as this object
     /// 
     pub fn republish(&self) -> Self {
+        self.core.lock().unwrap().publisher_count += 1;
+
         SinglePublisher {
             core:   Arc::clone(&self.core)
         }
@@ -98,24 +101,31 @@ impl<Message> Drop for SinglePublisher<Message> {
     fn drop(&mut self) {
         let to_notify = {
             // Lock the core
-            let pub_core = self.core.lock().unwrap();
+            let mut pub_core = self.core.lock().unwrap();
 
-            // Mark all the subscribers as unpublished and notify them so that they close
-            let mut to_notify = vec![];
+            // Check that this is the last publisher on this core
+            pub_core.publisher_count -= 1;
+            if pub_core.publisher_count == 0 {
+                // Mark all the subscribers as unpublished and notify them so that they close
+                let mut to_notify = vec![];
 
-            for mut subscriber in pub_core.subscribers.values() {
-                let mut subscriber = subscriber.lock().unwrap();
+                for mut subscriber in pub_core.subscribers.values() {
+                    let mut subscriber = subscriber.lock().unwrap();
 
-                // Unpublish the subscriber (so that it hits the end of the stream)
-                subscriber.published    = false;
-                subscriber.notify_ready = vec![];
+                    // Unpublish the subscriber (so that it hits the end of the stream)
+                    subscriber.published    = false;
+                    subscriber.notify_ready = vec![];
 
-                // Add to the things to notify once the lock is released
-                to_notify.extend(subscriber.notify_waiting.drain(..));
+                    // Add to the things to notify once the lock is released
+                    to_notify.extend(subscriber.notify_waiting.drain(..));
+                }
+
+                // Return the notifications outside of the lock
+                to_notify
+            } else {
+                // This is not the last core
+                vec![]
             }
-
-            // Return the notifications outside of the lock
-            to_notify
         };
 
         // Notify any subscribers that are waiting that we're unpublished

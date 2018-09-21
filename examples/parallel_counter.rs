@@ -43,8 +43,8 @@ fn main() {
         .map(|_| count_zeros(work_publisher.subscribe()))
         .collect::<Vec<_>>();
 
-    // Input stream is 100,000,000 random numbers
-    let input_stream = stream::iter_ok::<_, ()>((0..100_000_000)
+    // Input stream is 10,000,000 random numbers
+    let input_stream = stream::iter_ok::<_, ()>((0..10_000_000)
         .into_iter()
         .map(|_| rand::random::<u32>() % 1024));
     

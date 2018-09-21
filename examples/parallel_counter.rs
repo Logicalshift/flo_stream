@@ -10,6 +10,7 @@ use futures::stream;
 use futures::executor;
 
 use std::sync::*;
+use std::time;
 
 fn main() {
     // Demonstrates how the single publisher can be used with desync to schedule work across multiple threads
@@ -22,6 +23,13 @@ fn main() {
         // Counts the number of 0s in the input vector, asynchronously
         pipe(worker, input, |_state, next| {
             let mut count = 0;
+
+            // Do 10ms of actual 'work' (busy waiting)
+            let mut _some_count = 0;
+            let start = time::SystemTime::now();
+            while time::SystemTime::now().duration_since(start).unwrap() < time::Duration::from_millis(10) {
+                _some_count += 1;
+            }
             
             if let Ok(next) = next {
                 for val in next {
@@ -43,7 +51,7 @@ fn main() {
         .map(|_| count_zeros(work_publisher.subscribe()))
         .collect::<Vec<_>>();
 
-    // Input stream is 10,000,000 random numbers
+    // Input stream is 10,000,000 random numbers (in a release build you might want to try 100_000_000 or more)
     let input_stream = stream::iter_ok::<_, ()>((0..10_000_000)
         .into_iter()
         .map(|_| rand::random::<u32>() % 1024));
@@ -66,6 +74,6 @@ fn main() {
     // Wait for the processing to finish
     executor::spawn(work_done).wait_future().unwrap();
 
-    // Notify about the final count when we're done
+    // Notify about the final count when we're done (desync has some strict order guarantees that means that this will always be scheduled after the last task is complete)
     final_count.sync(|count| println!("Final count was {}", count));
 }

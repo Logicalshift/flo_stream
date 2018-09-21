@@ -15,5 +15,5 @@ categories      = ["concurrency","asynchronous","algorithms","data-structures"]
 futures = "0.1"
 
 [dev-dependencies]
-desync  = "0.2"
+desync  = { version = "^0.2.2", path = "../desync" }
 rand    = "0.5"

@@ -85,7 +85,9 @@ impl<Message: Clone> PubCore<Message> {
             Some(notifications)
         }
     }
+}
 
+impl<Message> PubCore<Message> {
     ///
     /// Checks this core for completion. If any messages are still waiting to be processed, returns false and sets the 'notify_complete' task
     /// 

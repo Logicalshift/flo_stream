@@ -87,7 +87,69 @@ impl<Message: Clone> PubCore<Message> {
     }
 }
 
+///
+/// Outcome of a single publish request
+/// 
+pub (crate) enum PublishSingleOutcome<Message> {
+    /// Message returned unpublished
+    NotPublished(Message),
+
+    /// Message published, with some notifications that need to be fired
+    Published(Vec<Task>)
+}
+
 impl<Message> PubCore<Message> {
+    ///
+    /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
+    /// if successful, or None if the message could not be sent
+    /// 
+    pub fn publish_single(&mut self, message: Message) -> PublishSingleOutcome<Message> {
+        let max_queue_size = self.max_queue_size;
+        
+        // Lock all of the subscribers
+        let mut subscribers = self.subscribers.values()
+            .map(|subscriber| subscriber.lock().unwrap())
+            .collect::<Vec<_>>();
+
+        // All subscribers must have enough space (we do not queue the message if any subscribe cannot accept it)
+        let mut ready = true;
+        for mut subscriber in subscribers.iter_mut() {
+            if subscriber.waiting.len() >= max_queue_size {
+                // This subscriber needs to notify us when it's ready
+                subscriber.notify_ready = Some(task::current());
+
+                // Not ready (we can't publish the message)
+                ready = false;
+            } else {
+                // This subscriber is already ready and doesn't need to notify us any more
+                subscriber.notify_ready = None;
+            }
+        }
+
+        if !ready {
+            // At least one subscriber has a full queue
+            PublishSingleOutcome::NotPublished(message)
+        } else {
+            // Try to find an idle subscriber (one where notify_waiting has a value, or which has more than one free slot in the queue)
+            if let Some(idle_subscriber) = subscribers.iter_mut()
+                .filter(|subscriber| subscriber.notify_waiting.is_some() || subscriber.waiting.len() < max_queue_size-1)
+                .nth(0) {
+                // Found an idle subscriber to notify
+                let notify = idle_subscriber.notify_waiting.take();
+
+                // Send the message to this subscriber alone
+                idle_subscriber.waiting.push_back(message);
+
+                // Caller should notify the subscriber that new data is available
+                PublishSingleOutcome::Published(notify.into_iter().collect())
+            } else {
+                // No idle subscribers. All subscribers should notify us when they're ready
+                // Message was not published
+                PublishSingleOutcome::NotPublished(message)
+            }
+        }
+    }
+
     ///
     /// Checks this core for completion. If any messages are still waiting to be processed, returns false and sets the 'notify_complete' task
     /// 

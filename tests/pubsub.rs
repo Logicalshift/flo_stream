@@ -233,3 +233,45 @@ fn blocks_if_subscribers_are_full() {
         assert!(subscriber.wait_stream() == Some(Ok(a)));
     }
 }
+
+#[test]
+fn single_receive_on_one_subscriber() {
+    let mut publisher   = SinglePublisher::new(10);
+    let subscriber      = publisher.subscribe();
+
+    let mut publisher   = executor::spawn(publisher);
+    let mut subscriber  = executor::spawn(subscriber);
+
+    publisher.wait_send(1).unwrap();
+    publisher.wait_send(2).unwrap();
+    publisher.wait_send(3).unwrap();
+
+    assert!(subscriber.wait_stream() == Some(Ok(1)));
+    assert!(subscriber.wait_stream() == Some(Ok(2)));
+    assert!(subscriber.wait_stream() == Some(Ok(3)));
+}
+
+#[test]
+fn single_receive_on_two_subscribers() {
+    let mut publisher   = SinglePublisher::new(1);
+    let subscriber1     = publisher.subscribe();
+    let subscriber2     = publisher.subscribe();
+
+    let mut publisher   = executor::spawn(publisher);
+    let mut subscriber1 = executor::spawn(subscriber1);
+    let mut subscriber2 = executor::spawn(subscriber2);
+
+    publisher.wait_send(1).unwrap();
+    publisher.wait_send(2).unwrap();
+
+    let msg1 = subscriber1.wait_stream();
+    let msg2 = subscriber2.wait_stream();
+
+    assert!(msg1 == Some(Ok(1)) || msg1 == Some(Ok(2)));
+
+    if msg1 == Some(Ok(1)) {
+        assert!(msg2 == Some(Ok(2)));
+    } else {
+        assert!(msg2 == Some(Ok(1)));
+    }
+}

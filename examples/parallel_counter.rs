@@ -74,6 +74,6 @@ fn main() {
     // Wait for the processing to finish
     executor::spawn(work_done).wait_future().unwrap();
 
-    // Notify about the final count when we're done (desync has some strict order guarantees that means that this will always be scheduled after the last task is complete)
+    // Notify about the final count when we're done
     final_count.sync(|count| println!("Final count was {}", count));
 }

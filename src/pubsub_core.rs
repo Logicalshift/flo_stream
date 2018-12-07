@@ -59,7 +59,7 @@ impl<Message: Clone> PubCore<Message> {
 
         // All subscribers must have enough space (we do not queue the message if any subscribe cannot accept it)
         let mut ready = true;
-        for mut subscriber in subscribers.iter_mut() {
+        for subscriber in subscribers.iter_mut() {
             if subscriber.waiting.len() >= max_queue_size {
                 // This subscriber needs to notify us when it's ready
                 subscriber.notify_ready.push(task::current());

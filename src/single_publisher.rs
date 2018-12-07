@@ -109,7 +109,7 @@ impl<Message> Drop for SinglePublisher<Message> {
                 // Mark all the subscribers as unpublished and notify them so that they close
                 let mut to_notify = vec![];
 
-                for mut subscriber in pub_core.subscribers.values() {
+                for subscriber in pub_core.subscribers.values() {
                     let mut subscriber = subscriber.lock().unwrap();
 
                     // Unpublish the subscriber (so that it hits the end of the stream)

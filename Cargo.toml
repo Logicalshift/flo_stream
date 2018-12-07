@@ -17,4 +17,4 @@ futures = "0.1"
 
 [dev-dependencies]
 desync  = "0.3"
-rand    = "0.5"
+rand    = "0.6"

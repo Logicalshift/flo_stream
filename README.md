@@ -1,5 +1,5 @@
 ```toml
-flo_stream = "0.1"
+flo_stream = "0.2"
 ```
 
 # flo_stream

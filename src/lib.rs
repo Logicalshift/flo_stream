@@ -37,6 +37,8 @@
 //! assert!(subscriber.wait_stream() == Some(Ok(3)));
 //! ```
 
+#![warn(bare_trait_objects)]
+
 extern crate futures;
 
 mod publisher_sink;

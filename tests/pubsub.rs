@@ -293,3 +293,22 @@ fn single_receive_on_two_subscribers() {
         assert!(msg2 == Some(Ok(1)));
     }
 }
+
+#[test]
+fn expiring_removes_oldest_events_first() {
+    let mut publisher   = ExpiringPublisher::new(5);
+    let subscriber      = publisher.subscribe();
+
+    let mut publisher   = executor::spawn(publisher);
+    let mut subscriber  = executor::spawn(subscriber);
+
+    for evt in 0..100 {
+        publisher.wait_send(evt).unwrap();
+    }
+
+    assert!(subscriber.wait_stream() == Some(Ok(95)));
+    assert!(subscriber.wait_stream() == Some(Ok(96)));
+    assert!(subscriber.wait_stream() == Some(Ok(97)));
+    assert!(subscriber.wait_stream() == Some(Ok(98)));
+    assert!(subscriber.wait_stream() == Some(Ok(99)));
+}

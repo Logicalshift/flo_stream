@@ -85,6 +85,30 @@ impl<Message: Clone> PubCore<Message> {
             Some(notifications)
         }
     }
+
+    ///
+    /// Removes the oldest message from any subscribers that are full and then attempts to publish new message.
+    /// 
+    pub fn publish_expiring_oldest(&mut self, message: &Message) -> Option<Vec<Task>> {
+        {
+            let max_queue_size = self.max_queue_size;
+            
+            // Lock all of the subscribers
+            let mut subscribers = self.subscribers.values()
+                .map(|subscriber| subscriber.lock().unwrap())
+                .collect::<Vec<_>>();
+
+            // Expire messages from any subscribers with a full queue
+            for subscriber in subscribers.iter_mut() {
+                if subscriber.waiting.len() >= max_queue_size {
+                    subscriber.waiting.pop_front();
+                }
+            }
+        }
+
+        // Publish the message
+        self.publish(message)
+    }
 }
 
 ///

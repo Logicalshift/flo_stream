@@ -45,12 +45,14 @@ mod publisher_sink;
 mod publisher;
 mod blocking_publisher;
 mod single_publisher;
+mod expiring_publisher;
 mod subscriber;
 mod pubsub_core;
 mod spawn;
 
 pub use self::publisher_sink::*;
 pub use self::publisher::*;
+pub use self::expiring_publisher::*;
 pub use self::blocking_publisher::*;
 pub use self::single_publisher::*;
 pub use self::subscriber::*;

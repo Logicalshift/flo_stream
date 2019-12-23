@@ -1,3 +1,4 @@
+/*
 use super::subscriber::*;
 use super::publisher_sink::*;
 
@@ -18,3 +19,4 @@ impl<Message: Clone, S: PublisherSink<Message>> PubSubSpawn<Message> for Spawn<S
         self.get_mut().subscribe()
     }
 }
+*/

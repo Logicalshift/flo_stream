@@ -1,5 +1,5 @@
 use futures::task;
-use futures::task::Task;
+use futures::task::{Waker};
 
 use std::sync::*;
 use std::collections::{VecDeque, HashMap};
@@ -35,13 +35,13 @@ pub (crate) struct SubCore<Message> {
     pub waiting: VecDeque<Message>,
 
     /// Notification tasks for when the 'waiting' queue becomes non-empty
-    pub notify_waiting: Vec<Task>,
+    pub notify_waiting: Vec<Waker>,
 
     /// If the publisher is waiting on this subscriber, this is the notification to send
-    pub notify_ready: Vec<Task>,
+    pub notify_ready: Vec<Waker>,
 
     /// If the publisher is waiting for this subscriber to complete, this is the notification to send
-    pub notify_complete: Vec<Task>
+    pub notify_complete: Vec<Waker>
 }
 
 impl<Message: Clone> PubCore<Message> {
@@ -49,7 +49,7 @@ impl<Message: Clone> PubCore<Message> {
     /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
     /// if successful, or None if the message could not be sent
     /// 
-    pub fn publish(&mut self, message: &Message) -> Option<Vec<Task>> {
+    pub fn publish(&mut self, message: &Message, context: &task::Context) -> Option<Vec<Waker>> {
         let max_queue_size = self.max_queue_size;
         
         // Lock all of the subscribers
@@ -62,7 +62,7 @@ impl<Message: Clone> PubCore<Message> {
         for subscriber in subscribers.iter_mut() {
             if subscriber.waiting.len() >= max_queue_size {
                 // This subscriber needs to notify us when it's ready
-                subscriber.notify_ready.push(task::current());
+                subscriber.notify_ready.push(context.waker().clone());
 
                 // Not ready
                 ready = false;
@@ -89,7 +89,7 @@ impl<Message: Clone> PubCore<Message> {
     ///
     /// Removes the oldest message from any subscribers that are full and then attempts to publish new message.
     /// 
-    pub fn publish_expiring_oldest(&mut self, message: &Message) -> Option<Vec<Task>> {
+    pub fn publish_expiring_oldest(&mut self, message: &Message, context: &task::Context) -> Option<Vec<Waker>> {
         {
             let max_queue_size = self.max_queue_size;
             
@@ -107,7 +107,7 @@ impl<Message: Clone> PubCore<Message> {
         }
 
         // Publish the message
-        self.publish(message)
+        self.publish(message, context)
     }
 }
 
@@ -119,7 +119,7 @@ pub (crate) enum PublishSingleOutcome<Message> {
     NotPublished(Message),
 
     /// Message published, with some notifications that need to be fired
-    Published(Vec<Task>)
+    Published(Vec<Waker>)
 }
 
 impl<Message> PubCore<Message> {
@@ -127,7 +127,7 @@ impl<Message> PubCore<Message> {
     /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
     /// if successful, or None if the message could not be sent
     /// 
-    pub fn publish_single(&mut self, message: Message) -> PublishSingleOutcome<Message> {
+    pub fn publish_single(&mut self, message: Message, context: &task::Context) -> PublishSingleOutcome<Message> {
         let max_queue_size = self.max_queue_size;
         
         // Lock all of the subscribers
@@ -155,7 +155,7 @@ impl<Message> PubCore<Message> {
 
         // No idle subscribers. All subscribers should notify us when they're ready
         subscribers.iter_mut()
-            .for_each(|subscriber| subscriber.notify_ready.push(task::current()));
+            .for_each(|subscriber| subscriber.notify_ready.push(context.waker().clone()));
 
         // Message was not published
         PublishSingleOutcome::NotPublished(message)
@@ -164,7 +164,7 @@ impl<Message> PubCore<Message> {
     ///
     /// Checks this core for completion. If any messages are still waiting to be processed, returns false and sets the 'notify_complete' task
     /// 
-    pub fn complete(&mut self) -> bool {
+    pub fn complete(&mut self, context: &task::Context) -> bool {
         // The core is ready if there are currently no subscribers with any waiting messages
 
         // Collect the subscribers into one place
@@ -180,7 +180,7 @@ impl<Message> PubCore<Message> {
                 complete = false;
 
                 // This subscriber needs to notify this task when it becomes ready
-                subscriber.notify_complete.push(task::current());
+                subscriber.notify_complete.push(context.waker().clone());
             }
         }
 

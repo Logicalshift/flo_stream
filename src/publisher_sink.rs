@@ -4,7 +4,7 @@ use futures::*;
 ///
 /// Trait implemented by sinks that act as a publisher
 /// 
-pub trait PublisherSink<Message> : Sink<SinkItem=Message, SinkError=()> {
+pub trait PublisherSink<Message> : Sink<Message, Error=()> {
     ///
     /// Creates a subscription to this publisher
     /// 

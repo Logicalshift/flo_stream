@@ -44,6 +44,17 @@ pub (crate) struct SubCore<Message> {
     pub notify_complete: Vec<Waker>
 }
 
+///
+/// Outcome of a single publish request
+/// 
+pub (crate) enum PublishSingleOutcome<Message> {
+    /// Message returned unpublished
+    NotPublished(Message),
+
+    /// Message published, with some notifications that need to be fired
+    Published(Vec<Waker>)
+}
+
 impl<Message: Clone> PubCore<Message> {
     ///
     /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
@@ -109,22 +120,9 @@ impl<Message: Clone> PubCore<Message> {
         // Publish the message
         self.publish(message, context)
     }
-}
 
-///
-/// Outcome of a single publish request
-/// 
-pub (crate) enum PublishSingleOutcome<Message> {
-    /// Message returned unpublished
-    NotPublished(Message),
-
-    /// Message published, with some notifications that need to be fired
-    Published(Vec<Waker>)
-}
-
-impl<Message> PubCore<Message> {
     ///
-    /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
+    /// Attempts to publish a message to a single subscriber, returning the list of notifications that need to be generated
     /// if successful, or None if the message could not be sent
     /// 
     pub fn publish_single(&mut self, message: Message, context: &task::Context) -> PublishSingleOutcome<Message> {

@@ -2,6 +2,7 @@ use super::pubsub_core::*;
 
 use futures::*;
 use futures::task;
+use futures::task::{Poll};
 
 use std::sync::*;
 
@@ -125,16 +126,15 @@ impl<Message> Drop for Subscriber<Message> {
         };
 
         // After releasing the locks, notify the publisher if it's waiting on this subscriber
-        notify_ready.into_iter().for_each(|notify| notify.notify());
-        notify_complete.into_iter().for_each(|notify| notify.notify());
+        notify_ready.into_iter().for_each(|notify| notify.wake());
+        notify_complete.into_iter().for_each(|notify| notify.wake());
     }
 }
 
 impl<Message> Stream for Subscriber<Message> {
     type Item   = Message;
-    type Error  = ();
 
-    fn poll(&mut self) -> Poll<Option<Message>, ()> {
+    fn poll_next(&mut self, context: &task::Context) -> Poll<Option<Message>> {
         let (result, notify_ready, notify_complete) = {
             // Try to read a message from the waiting list
             let mut sub_core    = self.sub_core.lock().unwrap();
@@ -152,25 +152,25 @@ impl<Message> Stream for Subscriber<Message> {
                 let notify_ready = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
 
                 // Return the next message if it's available
-                (Ok(Async::Ready(Some(next_message))), notify_ready, notify_complete)
+                (Poll::Ready(Some(next_message)), notify_ready, notify_complete)
             } else if !sub_core.published {
                 // Stream has finished if the publisher core is no longer available
-                (Ok(Async::Ready(None)), vec![], vec![])
+                (Poll::Ready(None), vec![], vec![])
             } else {
                 // If the publisher is still alive and there are no messages available, store notification and carry on
-                sub_core.notify_waiting.push(task::current());
+                sub_core.notify_waiting.push(context.waker().clone());
 
                 // If anything is waiting for this subscriber to become ready, make sure it's notified
                 let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
                 let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>();
 
-                (Ok(Async::NotReady), notify_ready, notify_complete)
+                (Poll::Pending, notify_ready, notify_complete)
             }
         };
 
         // If there's something to notify as a result of this request, do so (note that we do this after releasing the core lock)
-        notify_ready.into_iter().for_each(|ready| ready.notify());
-        notify_complete.into_iter().for_each(|complete| complete.notify());
+        notify_ready.into_iter().for_each(|ready| ready.wake());
+        notify_complete.into_iter().for_each(|complete| complete.wake());
 
         // Return the result
         result

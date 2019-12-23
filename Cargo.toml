@@ -1,6 +1,6 @@
 [package]
 name            = "flo_stream"
-version         = "0.3.1"
+version         = "0.4.0"
 authors         = ["Andrew Hunter"]
 license         = "Apache-2.0"
 repository      = "https://github.com/Logicalshift/flo_stream"
@@ -13,8 +13,8 @@ keywords        = ["pubsub", "futures", "concurrency"]
 categories      = ["concurrency","asynchronous","algorithms","data-structures"]
 
 [dependencies]
-futures = "0.1"
+futures = "0.3"
 
 [dev-dependencies]
-desync  = "0.3"
+desync  = "0.5"
 rand    = "0.6"

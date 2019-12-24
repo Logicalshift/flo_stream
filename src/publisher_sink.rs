@@ -9,10 +9,10 @@ use futures::future::{BoxFuture};
 ///
 pub struct MessageSender<Message> {
     /// Callback that sends the message
-    send_message: Box<dyn FnOnce(Message) -> ()>,
+    send_message: Box<dyn FnOnce(Message) -> ()+Send>,
 
     /// Callback that abandons sending the message
-    cancel_send: Box<dyn FnOnce() -> ()>,
+    cancel_send: Box<dyn FnOnce() -> ()+Send>,
 
     /// Set to true once the message has been sent
     sent: bool
@@ -55,6 +55,19 @@ where   Message:    'static+Send,
 }
 
 impl<Message> MessageSender<Message> {
+    ///
+    /// Creates a new message sender that will perform the supplied actions when the message is sent
+    ///
+    pub fn new<TSendMsg, TCancelSend>(send_msg: TSendMsg, cancel_send: TCancelSend) -> MessageSender<Message>
+    where   TSendMsg:       'static+Send+FnOnce(Message) -> (),
+            TCancelSend:    'static+Send+FnOnce() -> () {
+        MessageSender {
+            send_message:   Box::new(send_msg),
+            cancel_send:    Box::new(cancel_send),
+            sent:           false
+        }
+    }
+
     /// 
     /// Sends a message, consuming this object
     /// 
@@ -62,5 +75,13 @@ impl<Message> MessageSender<Message> {
     pub fn send(self, message: Message) {
         self.sent = true;
         (self.send_message)(message)
+    }
+}
+
+impl<Message> Drop for MessageSender<Message> {
+    fn drop(&mut self) {
+        if !self.sent {
+            (self.cancel_send)();
+        }
     }
 }

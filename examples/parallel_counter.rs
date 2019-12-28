@@ -1,6 +1,3 @@
-fn main() { unimplemented!("TODO") }
-
-/*
 extern crate desync;
 extern crate flo_stream;
 extern crate futures;
@@ -19,7 +16,7 @@ fn main() {
     // Demonstrates how the single publisher can be used with desync to schedule work across multiple threads
 
     // Task that takes some chunks of work (vectors of numbers) and counts the number of 0s in each, returning a stream of results
-    fn count_zeros<In: 'static+Send+Stream<Item=Vec<u32>, Error=()>>(input: In) -> impl Stream<Item=u32, Error=()> {
+    fn count_zeros<In: 'static+Unpin+Send+Stream<Item=Vec<u32>>>(input: In) -> impl Stream<Item=u32> {
         // There's no state, so we desync around a void type
         let worker = Arc::new(Desync::new(()));
 
@@ -34,11 +31,9 @@ fn main() {
                 _some_count += 1;
             }
             
-            if let Ok(next) = next {
-                for val in next {
-                    if val == 0 {
-                        count += 1;
-                    }
+            for val in next {
+                if val == 0 {
+                    count += 1;
                 }
             }
 
@@ -55,7 +50,7 @@ fn main() {
         .collect::<Vec<_>>();
 
     // Input stream is 10,000,000 random numbers (in a release build you might want to try 100_000_000 or more)
-    let input_stream = stream::iter_ok::<_, ()>((0..10_000_000)
+    let input_stream = stream::iter::<_>((0..10_000_000)
         .into_iter()
         .map(|_| rand::random::<u32>() % 1024));
     
@@ -69,15 +64,16 @@ fn main() {
     let final_count = Arc::new(Desync::new(0));
     workers.into_iter().for_each(|worker| {
         pipe_in(final_count.clone(), worker, |state, next| {
-            *state += next.unwrap_or(0);
+            *state += next;
             println!("So far: {}", *state);
         });
     });
 
     // Wait for the processing to finish
-    executor::spawn(work_done).wait_future().unwrap();
+    executor::block_on(async {
+        work_done.await;
+    });
 
     // Notify about the final count when we're done
     final_count.sync(|count| println!("Final count was {}", count));
 }
-*/

@@ -70,7 +70,9 @@ impl<Message: Clone> ExpiringPublisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> MessagePublisher<Message> for ExpiringPublisher<Message> {
+impl<Message: 'static+Send+Clone> MessagePublisher for ExpiringPublisher<Message> {
+    type Message = Message;
+
     ///
     /// Subscribes to this publisher
     /// 

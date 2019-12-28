@@ -20,20 +20,21 @@ pub struct MessageSender<Message> {
 ///
 /// Trait that provides functions for publishing messages to subscribers
 /// 
-pub trait MessagePublisher<Message>
-where   Message:    'static+Send,
-        Self:       Send {
+pub trait MessagePublisher
+where   Self:       Send {
+    type Message: 'static+Send;
+
     ///
     /// Creates a subscription to this publisher
     /// 
     /// Any future messages sent here will also be sent to this subscriber.
     /// 
-    fn subscribe(&mut self) -> Subscriber<Message>;
+    fn subscribe(&mut self) -> Subscriber<Self::Message>;
 
     ///
     /// Reserves a space for a message with the subscribers, returning when it's ready
     ///
-    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Message>>;
+    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Self::Message>>;
 
     ///
     /// Waits until all subscribers have consumed all pending messages
@@ -43,7 +44,7 @@ where   Message:    'static+Send,
     ///
     /// Publishes a message to the subscribers of this object 
     ///
-    fn publish(&mut self, message: Message) -> BoxFuture<'static, ()> {
+    fn publish(&mut self, message: Self::Message) -> BoxFuture<'static, ()> {
         let when_ready = self.when_ready();
 
         Box::pin(async move {

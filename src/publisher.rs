@@ -57,7 +57,9 @@ impl<Message: Clone> Publisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> MessagePublisher<Message> for Publisher<Message> {
+impl<Message: 'static+Send+Clone> MessagePublisher for Publisher<Message> {
+    type Message = Message;
+
     ///
     /// Subscribes to this publisher
     /// 

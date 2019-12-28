@@ -71,7 +71,9 @@ impl<Message: Clone> BlockingPublisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> MessagePublisher<Message> for BlockingPublisher<Message> {
+impl<Message: 'static+Send+Clone> MessagePublisher for BlockingPublisher<Message> {
+    type Message = Message;
+
     fn subscribe(&mut self) -> Subscriber<Message> {
         // Create the subscription
         let subscription = self.publisher.subscribe();

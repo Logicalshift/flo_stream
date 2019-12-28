@@ -1,4 +1,3 @@
-/*
 extern crate futures;
 extern crate flo_stream;
 
@@ -6,35 +5,36 @@ use flo_stream::*;
 
 use futures::*;
 use futures::executor;
-use futures::executor::{Notify, NotifyHandle};
 
 use std::thread;
 use std::sync::mpsc::channel;
 
+/*
 #[derive(Clone)]
 struct NotifyNothing;
 
 impl Notify for NotifyNothing {
     fn notify(&self, _: usize) { }
 }
+*/
 
 #[test]
 fn receive_on_one_subscriber() {
-    let mut publisher   = Publisher::new(10);
-    let subscriber      = publisher.subscribe();
+    let mut publisher   = Publisher::<i32>::new(10);
+    let mut subscriber  = publisher.subscribe();
 
-    let mut publisher   = executor::spawn(publisher);
-    let mut subscriber  = executor::spawn(subscriber);
+    executor::block_on(async {
+        publisher.publish(1).await;
+        publisher.publish(2).await;
+        publisher.publish(3).await;
 
-    publisher.wait_send(1).unwrap();
-    publisher.wait_send(2).unwrap();
-    publisher.wait_send(3).unwrap();
-
-    assert!(subscriber.wait_stream() == Some(Ok(1)));
-    assert!(subscriber.wait_stream() == Some(Ok(2)));
-    assert!(subscriber.wait_stream() == Some(Ok(3)));
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
+    })
 }
 
+/*
 #[test]
 fn complete_when_empty() {
     let mut publisher   = Publisher::new(10);

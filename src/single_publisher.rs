@@ -110,7 +110,9 @@ impl<Message: 'static+Send+Clone> PublisherSink<Message> for SinglePublisher<Mes
     /// Waits until all subscribers have consumed all pending messages
     ///
     fn when_empty(&mut self) -> BoxFuture<'static, ()> {
-        unimplemented!()
+        let when_empty  = PubCore::when_empty(&self.core);
+
+        Box::pin(when_empty)
     }
 }
 

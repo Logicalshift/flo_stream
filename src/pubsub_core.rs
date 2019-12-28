@@ -214,6 +214,38 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
     }
 
     ///
+    /// Returns a future that will return when all of the subscribers have no data left to process
+    ///
+    pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()> {
+        let core                = Arc::clone(arc_self);
+
+        future::poll_fn(move |context| {
+            // Lock the core and all of the subscribers
+            let core            = Arc::clone(&core);
+            let pub_core        = core.lock().unwrap();
+            let mut subscribers = pub_core.subscribers.iter()
+                .map(|(id, subscriber)| {
+                    (*id, subscriber, subscriber.lock().unwrap())
+                })
+                .collect::<SmallVec<[_; 8]>>();
+
+            // Check that all subscribers are empty (wait on the first that's not)
+            for (_id, _subscriber, sub_core) in subscribers.iter_mut() {
+                if sub_core.queue_size() > 0 {
+                    // Wake when this subscriber becomes ready to check again
+                    sub_core.notify_ready.push(context.waker().clone());
+
+                    // Wait for this subscriber to empty
+                    return Poll::Pending;
+                }
+            }
+
+            // All subscribers are empty
+            Poll::Ready(())
+        })
+    }
+
+    ///
     /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
     /// if successful, or None if the message could not be sent
     /// 

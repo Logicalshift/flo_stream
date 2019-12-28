@@ -2,7 +2,6 @@ use super::publisher_sink::*;
 
 use futures::future;
 use futures::future::{Future};
-use futures::task;
 use futures::task::{Waker, Poll};
 use smallvec::*;
 
@@ -66,7 +65,7 @@ impl<Message: Clone> SubCore<Message> {
     fn cancel_send(arc_self: &Arc<Mutex<SubCore<Message>>>) {
         let ready_wakers = {
             // Add the message to the waiting list
-            let sub_core        = arc_self.lock().unwrap();
+            let mut sub_core    = arc_self.lock().unwrap();
             sub_core.reserved   -= 1;
 
             // Wake anything that was waiting for a new message
@@ -83,7 +82,7 @@ impl<Message: Clone> SubCore<Message> {
     fn send_message(arc_self: &Arc<Mutex<SubCore<Message>>>, message: &Message) {
         let waiting_wakers = {
             // Add the message to the waiting list
-            let sub_core        = arc_self.lock().unwrap();
+            let mut sub_core    = arc_self.lock().unwrap();
             sub_core.reserved   -= 1;
             sub_core.waiting.push_back(message.clone());
 
@@ -173,7 +172,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
                 .collect::<SmallVec<[_; 8]>>();
 
             // Check that all subscribers have a free slot
-            for (id, subscriber, sub_core) in subscribers.iter_mut() {
+            for (id, _subscriber, sub_core) in subscribers.iter_mut() {
                 if !reserved_ids.contains(id) {
                     // We haven't already reserved a slot in this queue
                     if sub_core.queue_size() >= pub_core.max_queue_size {
@@ -184,7 +183,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
                         // This subscriber has a slot available: reserve it for us
                         // TODO: if the future is dropped we need to return these reservations to their respective cores
                         sub_core.reserved += 1;
-                        reserved_ids.insert(id);
+                        reserved_ids.insert(*id);
                     }
                 }
             }
@@ -198,6 +197,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             let all_subscribers1    = all_subscribers;
             let all_subscribers2    = Arc::clone(&all_subscribers1);
 
+            let core                = Arc::clone(&core);
             let sender              = MessageSender::new(move |message| {
                 // Lock the core while we send to the subscribers (so only one sender can be active at once)
                 let _pub_core = core.lock().unwrap();
@@ -231,7 +231,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
                 .collect::<SmallVec<[_; 8]>>();
 
             // Check that all subscribers have a free slot
-            for (id, subscriber, sub_core) in subscribers.iter_mut() {
+            for (id, _subscriber, sub_core) in subscribers.iter_mut() {
                 if !reserved_ids.contains(id) {
                     // We haven't already reserved a slot in this queue
                     if sub_core.queue_size() >= pub_core.max_queue_size && sub_core.waiting.len() == 0 {
@@ -246,12 +246,12 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
 
                         // Reserve our space instead
                         sub_core.reserved += 1;
-                        reserved_ids.insert(id);
+                        reserved_ids.insert(*id);
                     } else {
                         // This subscriber has a slot available: reserve it for us
                         // TODO: if the future is dropped we need to return these reservations to their respective cores
                         sub_core.reserved += 1;
-                        reserved_ids.insert(id);
+                        reserved_ids.insert(*id);
                     }
                 }
             }
@@ -264,6 +264,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             let all_subscribers     = Arc::new(all_subscribers);
             let all_subscribers1    = all_subscribers;
             let all_subscribers2    = Arc::clone(&all_subscribers1);
+            let core                = Arc::clone(&core);
 
             let sender              = MessageSender::new(move |message| {
                 // Lock the core while we send to the subscribers (so only one sender can be active at once)

@@ -1,6 +1,6 @@
 use super::subscriber::*;
 use super::pubsub_core::*;
-use super::publisher_sink::*;
+use super::message_publisher::*;
 
 use futures::future::{BoxFuture};
 
@@ -57,7 +57,7 @@ impl<Message: Clone> Publisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> PublisherSink<Message> for Publisher<Message> {
+impl<Message: 'static+Send+Clone> MessagePublisher<Message> for Publisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 

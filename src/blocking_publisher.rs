@@ -1,6 +1,6 @@
 use super::publisher::*;
 use super::subscriber::*;
-use super::publisher_sink::*;
+use super::message_publisher::*;
 
 use futures::*;
 use futures::future::{BoxFuture};
@@ -71,7 +71,7 @@ impl<Message: Clone> BlockingPublisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> PublisherSink<Message> for BlockingPublisher<Message> {
+impl<Message: 'static+Send+Clone> MessagePublisher<Message> for BlockingPublisher<Message> {
     fn subscribe(&mut self) -> Subscriber<Message> {
         // Create the subscription
         let subscription = self.publisher.subscribe();

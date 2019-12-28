@@ -20,7 +20,7 @@ pub struct MessageSender<Message> {
 ///
 /// Trait that provides functions for publishing messages to subscribers
 /// 
-pub trait PublisherSink<Message>
+pub trait MessagePublisher<Message>
 where   Message:    'static+Send,
         Self:       Send {
     ///

@@ -1,4 +1,4 @@
-use super::publisher_sink::*;
+use super::message_publisher::*;
 
 use futures::future;
 use futures::future::{Future};

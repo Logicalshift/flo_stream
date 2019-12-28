@@ -56,7 +56,7 @@ impl<Message> SinglePublisher<Message> {
     }
 }
 
-impl<Message> PublisherSink<Message> for SinglePublisher<Message> {
+impl<Message: 'static+Send> PublisherSink<Message> for SinglePublisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 

@@ -57,7 +57,7 @@ impl<Message: Clone> Publisher<Message> {
     }
 }
 
-impl<Message: Clone> PublisherSink<Message> for Publisher<Message> {
+impl<Message: 'static+Send+Clone> PublisherSink<Message> for Publisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 

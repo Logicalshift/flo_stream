@@ -70,7 +70,7 @@ impl<Message: Clone> ExpiringPublisher<Message> {
     }
 }
 
-impl<Message: Clone> PublisherSink<Message> for ExpiringPublisher<Message> {
+impl<Message: 'static+Send+Clone> PublisherSink<Message> for ExpiringPublisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 

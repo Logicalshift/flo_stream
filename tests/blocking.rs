@@ -5,7 +5,7 @@ use flo_stream::*;
 
 use futures::*;
 use futures::executor;
-use futures::executor::{Notify, NotifyHandle};
+use futures::task::{ArcWake, Poll};
 
 use std::thread;
 use std::sync::*;
@@ -14,77 +14,83 @@ use std::time::Duration;
 #[derive(Clone)]
 struct NotifyNothing;
 
-impl Notify for NotifyNothing {
-    fn notify(&self, _: usize) { }
+impl ArcWake for NotifyNothing {
+    fn wake_by_ref(_arc_self: &Arc<Self>) { }
 }
 
 #[test]
 pub fn blocks_if_there_are_no_subscribers() {
-    let publisher       = BlockingPublisher::new(2, 10);
-    let mut publisher   = executor::spawn(publisher);
+    let waker           = task::waker(Arc::new(NotifyNothing));
+    let mut ctxt        = task::Context::from_waker(&waker);
 
-    assert!(publisher.start_send_notify(1, &NotifyHandle::from(&NotifyNothing), 0) == Ok(AsyncSink::NotReady(1)));
+    let mut publisher   = BlockingPublisher::new(2, 10);
+
+    assert!(publisher.publish(1).poll_unpin(&mut ctxt) == Poll::Pending);
 }
 
 #[test]
 pub fn blocks_if_there_are_insufficient_subscribers() {
-    let publisher       = BlockingPublisher::new(2, 10);
-    let mut publisher   = executor::spawn(publisher);
+    let waker           = task::waker(Arc::new(NotifyNothing));
+    let mut ctxt        = task::Context::from_waker(&waker);
+
+    let mut publisher   = BlockingPublisher::new(2, 10);
     let _subscriber     = publisher.subscribe();
 
-    assert!(publisher.start_send_notify(1, &NotifyHandle::from(&NotifyNothing), 0) == Ok(AsyncSink::NotReady(1)));
+    assert!(publisher.publish(1).poll_unpin(&mut ctxt) == Poll::Pending);
 }
 
 #[test]
 pub fn unblocks_if_there_are_sufficient_subscribers() {
-    let publisher       = BlockingPublisher::new(2, 10);
-    let mut publisher   = executor::spawn(publisher);
+    let waker           = task::waker(Arc::new(NotifyNothing));
+    let mut ctxt        = task::Context::from_waker(&waker);
+
+    let mut publisher   = BlockingPublisher::new(2, 10);
     let _subscriber1    = publisher.subscribe();
     let _subscriber2    = publisher.subscribe();
 
-    assert!(publisher.start_send_notify(1, &NotifyHandle::from(&NotifyNothing), 0) == Ok(AsyncSink::Ready));
+    assert!(publisher.publish(1).poll_unpin(&mut ctxt) == Poll::Ready(()));
 }
 
 #[test]
 pub fn read_from_subscribers() {
-    let publisher       = BlockingPublisher::new(2, 10);
-    let mut publisher   = executor::spawn(publisher);
-    let subscriber1     = publisher.subscribe();
-    let subscriber2     = publisher.subscribe();
+    let mut publisher   = BlockingPublisher::new(2, 10);
+    let mut subscriber1 = publisher.subscribe();
+    let mut subscriber2 = publisher.subscribe();
 
-    let mut subscriber1 = executor::spawn(subscriber1);
-    let mut subscriber2 = executor::spawn(subscriber2);
+    executor::block_on(async {
+        publisher.publish(1).await;
+        publisher.publish(2).await;
+        publisher.publish(3).await;
 
-    publisher.wait_send(1).unwrap();
-    publisher.wait_send(2).unwrap();
-    publisher.wait_send(3).unwrap();
+        assert!(subscriber1.next().await == Some(1));
+        assert!(subscriber1.next().await == Some(2));
+        assert!(subscriber1.next().await == Some(3));
 
-    assert!(subscriber1.wait_stream() == Some(Ok(1)));
-    assert!(subscriber1.wait_stream() == Some(Ok(2)));
-    assert!(subscriber1.wait_stream() == Some(Ok(3)));
-
-    assert!(subscriber2.wait_stream() == Some(Ok(1)));
-    assert!(subscriber2.wait_stream() == Some(Ok(2)));
-    assert!(subscriber2.wait_stream() == Some(Ok(3)));
+        assert!(subscriber2.next().await == Some(1));
+        assert!(subscriber2.next().await == Some(2));
+        assert!(subscriber2.next().await == Some(3));
+    });
 }
 
 #[test]
 pub fn read_from_thread() {
-    let subscriber = {
+    let mut subscriber = {
         // Create a shared publisher
         let publisher = BlockingPublisher::new(1, 1);
-        let publisher = executor::spawn(publisher);
         let publisher = Arc::new(Mutex::new(publisher));
 
         // Create a thread to publish some values
         let thread_publisher = publisher.clone();
         thread::spawn(move || {
-            let wait_for_subscribers = thread_publisher.lock().unwrap().get_mut().when_ready();
-            executor::spawn(wait_for_subscribers).wait_future().unwrap();
+            let wait_for_subscribers = thread_publisher.lock().unwrap().when_ready();
 
-            thread_publisher.lock().unwrap().wait_send(1).unwrap();
-            thread_publisher.lock().unwrap().wait_send(2).unwrap();
-            thread_publisher.lock().unwrap().wait_send(3).unwrap();
+            executor::block_on(async {
+                wait_for_subscribers.await;
+
+                thread_publisher.lock().unwrap().publish(1).await;
+                thread_publisher.lock().unwrap().publish(2).await;
+                thread_publisher.lock().unwrap().publish(3).await;
+            });
         });
 
         // Pause for a bit to let the thread get ahead of us
@@ -95,23 +101,22 @@ pub fn read_from_thread() {
         subscriber
     };
 
-    let mut subscriber = executor::spawn(subscriber);
-
     // Should receive the values from the thread
-    assert!(subscriber.wait_stream() == Some(Ok(1)));
-    assert!(subscriber.wait_stream() == Some(Ok(2)));
-    assert!(subscriber.wait_stream() == Some(Ok(3)));
+    executor::block_on(async {
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
 
-    // As we don't retain the publisher, the thread is its only owner. When it finishes, the stream should close.
-    assert!(subscriber.wait_stream() == None);
+        // As we don't retain the publisher, the thread is its only owner. When it finishes, the stream should close.
+        assert!(subscriber.next().await == None);
+    });
 }
 
 #[test]
 pub fn read_from_thread_late_start() {
-    let subscriber = {
+    let mut subscriber = {
         // Create a shared publisher
         let publisher = BlockingPublisher::new(1, 1);
-        let publisher = executor::spawn(publisher);
         let publisher = Arc::new(Mutex::new(publisher));
 
         // Create a thread to publish some values
@@ -120,12 +125,14 @@ pub fn read_from_thread_late_start() {
             // Wait for the subscriber to be created
             thread::sleep(Duration::from_millis(20));
 
-            let wait_for_subscribers = thread_publisher.lock().unwrap().get_mut().when_ready();
-            executor::spawn(wait_for_subscribers).wait_future().unwrap();
+            let wait_for_subscribers = thread_publisher.lock().unwrap().when_ready();
+            executor::block_on(async {
+                wait_for_subscribers.await;
 
-            thread_publisher.lock().unwrap().wait_send(1).unwrap();
-            thread_publisher.lock().unwrap().wait_send(2).unwrap();
-            thread_publisher.lock().unwrap().wait_send(3).unwrap();
+                thread_publisher.lock().unwrap().publish(1).await;
+                thread_publisher.lock().unwrap().publish(2).await;
+                thread_publisher.lock().unwrap().publish(3).await;
+            });
         });
 
         // Subscribe to the thread (which should now wake up)
@@ -133,13 +140,13 @@ pub fn read_from_thread_late_start() {
         subscriber
     };
 
-    let mut subscriber = executor::spawn(subscriber);
-
     // Should receive the values from the thread
-    assert!(subscriber.wait_stream() == Some(Ok(1)));
-    assert!(subscriber.wait_stream() == Some(Ok(2)));
-    assert!(subscriber.wait_stream() == Some(Ok(3)));
+    executor::block_on(async {
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
 
-    // As we don't retain the publisher, the thread is its only owner. When it finishes, the stream should close.
-    assert!(subscriber.wait_stream() == None);
+        // As we don't retain the publisher, the thread is its only owner. When it finishes, the stream should close.
+        assert!(subscriber.next().await == None);
+    });
 }

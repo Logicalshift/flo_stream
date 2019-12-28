@@ -22,19 +22,18 @@ futures library in the usual way.
 Here's a full worked example with a single subscriber:
 
 ```Rust
-let publisher       = Publisher::new(10);
-let mut publisher   = executor::spawn(publisher);
+let mut publisher       = Publisher::new(10);
+let mut subscriber      = publisher.subscribe();
 
-let subscriber      = publisher.subscribe();
-let mut subscriber  = executor::spawn(subscriber);
+executor::block_on(async {
+    publisher.publish(1).await;
+    publisher.publish(2).await;
+    publisher.publish(3).await;
 
-publisher.wait_send(1).unwrap();
-publisher.wait_send(2).unwrap();
-publisher.wait_send(3).unwrap();
-
-assert!(subscriber.wait_stream() == Some(Ok(1)));
-assert!(subscriber.wait_stream() == Some(Ok(2)));
-assert!(subscriber.wait_stream() == Some(Ok(3)));
+    assert!(subscriber.next().await == Some(1));
+    assert!(subscriber.next().await == Some(2));
+    assert!(subscriber.next().await == Some(3));
+});
 ```
 
 It's also possible to call `subscriber.clone()` to create a new subscription from an existing one without needing to 

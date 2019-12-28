@@ -2,7 +2,7 @@ use super::subscriber::*;
 use super::pubsub_core::*;
 use super::publisher_sink::*;
 
-use futures::*;
+use futures::future::{BoxFuture};
 
 use std::sync::*;
 use std::collections::{HashMap, VecDeque};
@@ -56,7 +56,7 @@ impl<Message> SinglePublisher<Message> {
     }
 }
 
-impl<Message> PublisherSink<Message> for SinglePublisher<Message> {
+impl<Message: 'static+Send+Clone> PublisherSink<Message> for SinglePublisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 
@@ -77,6 +77,7 @@ impl<Message> PublisherSink<Message> for SinglePublisher<Message> {
             id:                 subscriber_id,
             published:          true,
             waiting:            VecDeque::new(),
+            reserved:           0,
             notify_waiting:     vec![],
             notify_ready:       vec![],
             notify_complete:    vec![]
@@ -94,6 +95,24 @@ impl<Message> PublisherSink<Message> for SinglePublisher<Message> {
 
         // Create the subscriber
         Subscriber::new(pub_core, sub_core)
+    }
+
+    ///
+    /// Reserves a space for a message with the subscribers, returning when it's ready
+    ///
+    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Message>> {
+        let when_ready  = PubCore::send_single_subscriber(&self.core);
+
+        Box::pin(when_ready)
+    }
+
+    ///
+    /// Waits until all subscribers have consumed all pending messages
+    ///
+    fn when_empty(&mut self) -> BoxFuture<'static, ()> {
+        let when_empty  = PubCore::when_empty(&self.core);
+
+        Box::pin(when_empty)
     }
 }
 
@@ -129,41 +148,6 @@ impl<Message> Drop for SinglePublisher<Message> {
         };
 
         // Notify any subscribers that are waiting that we're unpublished
-        to_notify.into_iter().for_each(|notify| notify.notify());
-    }
-}
-
-impl<Message> Sink for SinglePublisher<Message> {
-    type SinkItem   = Message;
-    type SinkError  = ();
-
-    fn start_send(&mut self, item: Message) -> StartSend<Message, ()> {
-        // Publish the message to the core
-        let notify = { self.core.lock().unwrap().publish_single(item) };
-
-        match notify {
-            PublishSingleOutcome::Published(notify) => {
-                // Notify all the subscribers that the item has been published
-                notify.into_iter().for_each(|notify| notify.notify());
-
-                // Message sent
-                Ok(AsyncSink::Ready)
-            },
-
-            PublishSingleOutcome::NotPublished(item) => {
-                // At least one subscriber has a full queue, so the message could not be sent
-                Ok(AsyncSink::NotReady(item))
-            }
-        }
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), ()> {
-        if self.core.lock().unwrap().complete() {
-            // All subscribers are ready to receive a message
-            Ok(Async::Ready(()))
-        } else {
-            // At least one subscriber has a full buffer
-            Ok(Async::NotReady)
-        }
+        to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }

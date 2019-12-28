@@ -16,7 +16,7 @@ fn main() {
     // Demonstrates how the single publisher can be used with desync to schedule work across multiple threads
 
     // Task that takes some chunks of work (vectors of numbers) and counts the number of 0s in each, returning a stream of results
-    fn count_zeros<In: 'static+Unpin+Send+Stream<Item=Vec<u32>>>(input: In) -> impl Stream<Item=u32> {
+    fn count_zeros<In: 'static+Unpin+Send+Stream<Item=Vec<u32>>>(input: In) -> impl Stream<Item=Result<u32, ()>> {
         // There's no state, so we desync around a void type
         let worker = Arc::new(Desync::new(()));
 
@@ -42,8 +42,8 @@ fn main() {
     }
 
     // Buffer size of 1 means that this will generate back pressure when any worker is busy
-    let mut work_publisher = SinglePublisher::new(1);
-    let mut work_publisher = work_publisher.to_sink();
+    let work_publisher      = SinglePublisher::new(1);
+    let mut work_publisher  = work_publisher.to_sink();
 
     // Create 5 workers to receive work from the publisher
     let workers = (0..5).into_iter()
@@ -56,23 +56,24 @@ fn main() {
         .map(|_| rand::random::<u32>() % 1024));
     
     // Slice into chunks with 32k numbers each
-    let input_work = input_stream.chunks(32000);
+    let input_work = input_stream.chunks(32000)
+        .map(|val| Ok(val));
 
     // Send the chunks to the work publisher to be scheduled
-    let work_done = work_publisher.send_all(input_work);
+    let work_done = input_work.forward(work_publisher);
 
     // Count up the results in another desync object
     let final_count = Arc::new(Desync::new(0));
     workers.into_iter().for_each(|worker| {
         pipe_in(final_count.clone(), worker, |state, next| {
-            *state += next;
+            *state += next.unwrap();
             println!("So far: {}", *state);
         });
     });
 
     // Wait for the processing to finish
     executor::block_on(async {
-        work_done.await;
+        work_done.await.unwrap();
     });
 
     // Notify about the final count when we're done

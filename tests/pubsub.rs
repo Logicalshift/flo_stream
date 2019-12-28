@@ -1,3 +1,4 @@
+/*
 extern crate futures;
 extern crate flo_stream;
 
@@ -312,3 +313,4 @@ fn expiring_removes_oldest_events_first() {
     assert!(subscriber.wait_stream() == Some(Ok(98)));
     assert!(subscriber.wait_stream() == Some(Ok(99)));
 }
+*/

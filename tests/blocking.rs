@@ -1,3 +1,4 @@
+/*
 extern crate futures;
 extern crate flo_stream;
 
@@ -143,3 +144,4 @@ pub fn read_from_thread_late_start() {
     // As we don't retain the publisher, the thread is its only owner. When it finishes, the stream should close.
     assert!(subscriber.wait_stream() == None);
 }
+*/

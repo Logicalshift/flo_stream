@@ -61,25 +61,26 @@ fn complete_when_empty() {
     });
 }
 
-/*
 #[test]
 fn subscriber_closes_when_publisher_closes() {
     let mut closed_subscriber = {
         let mut publisher   = Publisher::new(10);
-        let subscriber      = publisher.subscribe();
+        let mut subscriber  = publisher.subscribe();
 
-        let mut publisher   = executor::spawn(publisher);
-        let mut subscriber  = executor::spawn(subscriber);
+        executor::block_on(async {
+            publisher.publish(1).await;
+            assert!(subscriber.next().await == Some(1));
+        });
 
-        publisher.wait_send(1).unwrap();
-
-        assert!(subscriber.wait_stream() == Some(Ok(1)));
         subscriber
     };
 
-    assert!(closed_subscriber.wait_stream() == None);
+    executor::block_on(async {
+        assert!(closed_subscriber.next().await == None);
+    });
 }
 
+/*
 #[test]
 fn read_on_multiple_subscribers() {
     let mut publisher   = Publisher::new(10);

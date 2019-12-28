@@ -1,3 +1,4 @@
+use super::subscriber::*;
 use super::message_publisher::*;
 
 use futures::prelude::*;
@@ -21,6 +22,15 @@ where Publisher: MessagePublisher {
     ///
     pub fn as_publisher<'a>(&'a mut self) -> &'a mut Publisher {
         &mut self.publisher
+    }
+
+    ///
+    /// Creates a subscription to this publisher
+    /// 
+    /// Any future messages sent here will also be sent to this subscriber.
+    /// 
+    pub fn subscribe(&mut self) -> Subscriber<Publisher::Message> {
+        self.publisher.subscribe()
     }
 }
 

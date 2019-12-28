@@ -43,6 +43,7 @@ fn main() {
 
     // Buffer size of 1 means that this will generate back pressure when any worker is busy
     let mut work_publisher = SinglePublisher::new(1);
+    let mut work_publisher = work_publisher.to_sink();
 
     // Create 5 workers to receive work from the publisher
     let workers = (0..5).into_iter()

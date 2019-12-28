@@ -5,6 +5,7 @@ use futures::task;
 use futures::task::{Poll};
 
 use std::sync::*;
+use std::pin::{Pin};
 
 ///
 /// Represents a subscriber stream from a publisher sink
@@ -58,6 +59,7 @@ impl<Message: Clone> Subscriber<Message> {
                     id:                 new_id,
                     published:          true,
                     waiting:            sub_core.waiting.clone(),
+                    reserved:           0,
                     notify_waiting:     vec![],
                     notify_ready:       vec![],
                     notify_complete:    vec![]
@@ -84,6 +86,7 @@ impl<Message: Clone> Subscriber<Message> {
                 id:                 0,
                 published:          false,
                 waiting:            sub_core.waiting.clone(),
+                reserved:           0,
                 notify_waiting:     vec![],
                 notify_ready:       vec![],
                 notify_complete:    vec![]
@@ -134,7 +137,7 @@ impl<Message> Drop for Subscriber<Message> {
 impl<Message> Stream for Subscriber<Message> {
     type Item   = Message;
 
-    fn poll_next(&mut self, context: &task::Context) -> Poll<Option<Message>> {
+    fn poll_next(self: Pin<&mut Self>, context: &mut task::Context) -> Poll<Option<Message>> {
         let (result, notify_ready, notify_complete) = {
             // Try to read a message from the waiting list
             let mut sub_core    = self.sub_core.lock().unwrap();

@@ -1,6 +1,5 @@
 use super::subscriber::*;
 
-use futures::*;
 use futures::future::{BoxFuture};
 
 ///

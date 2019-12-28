@@ -2,8 +2,6 @@ use super::subscriber::*;
 use super::pubsub_core::*;
 use super::publisher_sink::*;
 
-use futures::*;
-
 use std::sync::*;
 use std::collections::{HashMap, VecDeque};
 

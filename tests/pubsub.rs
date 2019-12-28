@@ -5,18 +5,18 @@ use flo_stream::*;
 
 use futures::*;
 use futures::executor;
+use futures::task::{ArcWake};
 
 use std::thread;
+use std::sync::*;
 use std::sync::mpsc::channel;
 
-/*
 #[derive(Clone)]
 struct NotifyNothing;
 
-impl Notify for NotifyNothing {
-    fn notify(&self, _: usize) { }
+impl ArcWake for NotifyNothing {
+    fn wake_by_ref(_arc_self: &Arc<Self>) { }
 }
-*/
 
 #[test]
 fn receive_on_one_subscriber() {
@@ -34,30 +34,34 @@ fn receive_on_one_subscriber() {
     })
 }
 
-/*
 #[test]
 fn complete_when_empty() {
     let mut publisher   = Publisher::new(10);
-    let subscriber      = publisher.subscribe();
+    let mut subscriber  = publisher.subscribe();
 
-    let mut publisher   = executor::spawn(publisher);
-    let mut subscriber  = executor::spawn(subscriber);
+    executor::block_on(async {
+        publisher.when_empty().await;
 
-    assert!(publisher.poll_flush_notify(&NotifyHandle::from(&NotifyNothing), 1) == Ok(Async::Ready(())));
+        publisher.publish(1).await;
+        publisher.publish(2).await;
+        publisher.publish(3).await;
 
-    publisher.wait_send(1).unwrap();
-    publisher.wait_send(2).unwrap();
-    publisher.wait_send(3).unwrap();
+        let mut not_empty   = publisher.when_empty();
+        let waker           = task::waker(Arc::new(NotifyNothing));
+        let mut ctxt        = task::Context::from_waker(&waker);
+        assert!(not_empty.poll_unpin(&mut ctxt) == task::Poll::Pending);
 
-    assert!(publisher.poll_flush_notify(&NotifyHandle::from(&NotifyNothing), 1) == Ok(Async::NotReady));
+        let mut not_empty   = publisher.when_empty();
 
-    assert!(subscriber.wait_stream() == Some(Ok(1)));
-    assert!(subscriber.wait_stream() == Some(Ok(2)));
-    assert!(subscriber.wait_stream() == Some(Ok(3)));
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
 
-    assert!(publisher.poll_flush_notify(&NotifyHandle::from(&NotifyNothing), 1) == Ok(Async::Ready(())));
+        assert!(not_empty.poll_unpin(&mut ctxt) == task::Poll::Ready(()));
+    });
 }
 
+/*
 #[test]
 fn subscriber_closes_when_publisher_closes() {
     let mut closed_subscriber = {

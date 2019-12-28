@@ -129,10 +129,11 @@ impl<Message> Drop for SinglePublisher<Message> {
         };
 
         // Notify any subscribers that are waiting that we're unpublished
-        to_notify.into_iter().for_each(|notify| notify.notify());
+        to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }
 
+/*
 impl<Message> Sink for SinglePublisher<Message> {
     type SinkItem   = Message;
     type SinkError  = ();
@@ -167,3 +168,4 @@ impl<Message> Sink for SinglePublisher<Message> {
         }
     }
 }
+*/

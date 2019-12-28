@@ -3,7 +3,6 @@ use super::pubsub_core::*;
 use super::publisher_sink::*;
 
 use futures::*;
-use futures::sink::Sink;
 
 use std::sync::*;
 use std::collections::{HashMap, VecDeque};
@@ -79,6 +78,7 @@ impl<Message: Clone> PublisherSink<Message> for Publisher<Message> {
             id:                 subscriber_id,
             published:          true,
             waiting:            VecDeque::new(),
+            reserved:           0,
             notify_waiting:     vec![],
             notify_ready:       vec![],
             notify_complete:    vec![]
@@ -131,10 +131,11 @@ impl<Message> Drop for Publisher<Message> {
         };
 
         // Notify any subscribers that are waiting that we're unpublished
-        to_notify.into_iter().for_each(|notify| notify.notify());
+        to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }
 
+/*
 impl<Message: Clone> Sink for Publisher<Message> {
     type SinkItem   = Message;
     type SinkError  = ();
@@ -165,3 +166,4 @@ impl<Message: Clone> Sink for Publisher<Message> {
         }
     }
 }
+*/

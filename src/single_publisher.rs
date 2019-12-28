@@ -77,6 +77,7 @@ impl<Message> PublisherSink<Message> for SinglePublisher<Message> {
             id:                 subscriber_id,
             published:          true,
             waiting:            VecDeque::new(),
+            reserved:           0,
             notify_waiting:     vec![],
             notify_ready:       vec![],
             notify_complete:    vec![]

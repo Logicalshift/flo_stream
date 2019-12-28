@@ -152,36 +152,3 @@ impl<Message> Drop for Publisher<Message> {
         to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }
-
-/*
-impl<Message: Clone> Sink for Publisher<Message> {
-    type SinkItem   = Message;
-    type SinkError  = ();
-
-    fn start_send(&mut self, item: Message) -> StartSend<Message, ()> {
-        // Publish the message to the core
-        let notify = { self.core.lock().unwrap().publish(&item) };
-
-        if let Some(notify) = notify {
-            // Notify all the subscribers that the item has been published
-            notify.into_iter().for_each(|notify| notify.notify());
-
-            // Message sent
-            Ok(AsyncSink::Ready)
-        } else {
-            // At least one subscriber has a full queue, so the message could not be sent
-            Ok(AsyncSink::NotReady(item))
-        }
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), ()> {
-        if self.core.lock().unwrap().complete() {
-            // All subscribers are ready to receive a message
-            Ok(Async::Ready(()))
-        } else {
-            // At least one subscriber has a full buffer
-            Ok(Async::NotReady)
-        }
-    }
-}
-*/

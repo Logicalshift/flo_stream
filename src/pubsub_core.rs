@@ -95,17 +95,6 @@ impl<Message: Clone> SubCore<Message> {
     }
 }
 
-///
-/// Outcome of a single publish request
-/// 
-pub (crate) enum PublishSingleOutcome<Message> {
-    /// Message returned unpublished
-    NotPublished(Message),
-
-    /// Message published, with some notifications that need to be fired
-    Published(Vec<Waker>)
-}
-
 impl<Message: 'static+Clone+Send> PubCore<Message> {
     ///
     /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
@@ -146,7 +135,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             }
 
             // Have the subscribers notify us when a slot becomes free
-            subscribers.iter_mut().map(|(_id, _subscriber, sub_core)| { sub_core.notify_ready.push(context.waker().clone()) });
+            subscribers.iter_mut().for_each(|(_id, _subscriber, sub_core)| { sub_core.notify_ready.push(context.waker().clone()) });
 
             // Pending on a subscriber becoming ready
             Poll::Pending

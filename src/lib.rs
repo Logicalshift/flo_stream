@@ -42,8 +42,8 @@
 extern crate futures;
 
 mod message_publisher;
-mod sink;
 mod publisher;
+mod sink;
 mod blocking_publisher;
 mod single_publisher;
 mod expiring_publisher;
@@ -53,6 +53,7 @@ mod spawn;
 
 pub use self::message_publisher::*;
 pub use self::publisher::*;
+pub use self::sink::*;
 pub use self::expiring_publisher::*;
 pub use self::blocking_publisher::*;
 pub use self::single_publisher::*;

@@ -246,47 +246,6 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
     }
 
     ///
-    /// Attempts to publish a message to all subscribers, returning the list of notifications that need to be generated
-    /// if successful, or None if the message could not be sent
-    /// 
-    pub fn publish(&mut self, message: &Message, context: &task::Context) -> Option<Vec<Waker>> {
-        let max_queue_size = self.max_queue_size;
-        
-        // Lock all of the subscribers
-        let mut subscribers = self.subscribers.values()
-            .map(|subscriber| subscriber.lock().unwrap())
-            .collect::<Vec<_>>();
-
-        // All subscribers must have enough space (we do not queue the message if any subscriber cannot accept it)
-        let mut ready = true;
-        for subscriber in subscribers.iter_mut() {
-            if subscriber.waiting.len() >= max_queue_size {
-                // This subscriber needs to notify us when it's ready
-                subscriber.notify_ready.push(context.waker().clone());
-
-                // Not ready
-                ready = false;
-            }
-        }
-
-        if !ready {
-            // At least one subscriber has a full queue
-            None
-        } else {
-            // Send to all of the subscribers
-            subscribers.iter_mut().for_each(|subscriber| subscriber.waiting.push_back(message.clone()));
-
-            // Claim all of the notifications
-            let notifications = subscribers.iter_mut()
-                .flat_map(|subscriber| subscriber.notify_waiting.drain(..))
-                .collect::<Vec<_>>();
-
-            // Result is the notifications to fire
-            Some(notifications)
-        }
-    }
-
-    ///
     /// Removes the oldest message from any subscribers that are full and then attempts to publish new message.
     /// 
     pub fn publish_expiring_oldest(&mut self, message: &Message, context: &task::Context) -> Option<Vec<Waker>> {
@@ -307,70 +266,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
         }
 
         // Publish the message
-        self.publish(message, context)
-    }
-
-    ///
-    /// Attempts to publish a message to a single subscriber, returning the list of notifications that need to be generated
-    /// if successful, or None if the message could not be sent
-    /// 
-    pub fn publish_single(&mut self, message: Message, context: &task::Context) -> PublishSingleOutcome<Message> {
-        let max_queue_size = self.max_queue_size;
-        
-        // Lock all of the subscribers
-        let mut subscribers = self.subscribers.values()
-            .map(|subscriber| subscriber.lock().unwrap())
-            .collect::<Vec<_>>();
-
-        // Try to find an idle subscriber (one where notify_waiting has a value, or which has more than one free slot in the queue)
-        {
-            let idle_subscriber = subscribers.iter_mut()
-            .filter(|subscriber| subscriber.notify_waiting.len() > 0 || subscriber.waiting.len() < max_queue_size-1)
-            .nth(0);
-
-            if let Some(idle_subscriber) = idle_subscriber  {
-                // Found an idle subscriber to notify
-                let notify = idle_subscriber.notify_waiting.drain(..).collect();
-
-                // Send the message to this subscriber alone
-                idle_subscriber.waiting.push_back(message);
-
-                // Caller should notify the subscriber that new data is available
-                return PublishSingleOutcome::Published(notify);
-            }
-        }
-
-        // No idle subscribers. All subscribers should notify us when they're ready
-        subscribers.iter_mut()
-            .for_each(|subscriber| subscriber.notify_ready.push(context.waker().clone()));
-
-        // Message was not published
-        PublishSingleOutcome::NotPublished(message)
-    }
-
-    ///
-    /// Checks this core for completion. If any messages are still waiting to be processed, returns false and sets the 'notify_complete' task
-    /// 
-    pub fn complete(&mut self, context: &task::Context) -> bool {
-        // The core is ready if there are currently no subscribers with any waiting messages
-
-        // Collect the subscribers into one place
-        let mut subscribers = self.subscribers.values()
-            .map(|subscriber| subscriber.lock().unwrap())
-            .collect::<Vec<_>>();
-
-        // Determine if we're complete or not
-        let mut complete = true;
-        for subscriber in subscribers.iter_mut() {
-            if subscriber.waiting.len() > 0 {
-                // Not compelte
-                complete = false;
-
-                // This subscriber needs to notify this task when it becomes ready
-                subscriber.notify_complete.push(context.waker().clone());
-            }
-        }
-
-        complete
+        // self.publish(message, context)
+        unimplemented!()
     }
 }

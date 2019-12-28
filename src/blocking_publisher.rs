@@ -3,7 +3,7 @@ use super::subscriber::*;
 use super::publisher_sink::*;
 
 use futures::*;
-use futures::task::{Waker};
+use futures::future::{BoxFuture};
 use futures::channel::oneshot;
 
 ///
@@ -23,12 +23,6 @@ pub struct BlockingPublisher<Message> {
     /// The publisher where messages will be relayed
     publisher: Publisher<Message>,
 
-    /// Notification to be sent when there are enough subscribers in this publisher (waiting to send)
-    notify_full: Option<Waker>,
-
-    /// Notification to be sent when there are enough subscribers in this publisher (waiting for completion)
-    notify_complete: Option<Waker>,
-
     /// Futures to be notified when there are enough subscribers for this publisher
     notify_futures: Vec<oneshot::Sender<()>>
 }
@@ -45,8 +39,6 @@ impl<Message: Clone> BlockingPublisher<Message> {
             insufficient_subscribers:   required_subscribers != 0,
             required_subscribers:       required_subscribers,
             publisher:                  Publisher::new(buffer_size),
-            notify_full:                None,
-            notify_complete:            None,
             notify_futures:             vec![]
         }
     }
@@ -56,7 +48,7 @@ impl<Message: Clone> BlockingPublisher<Message> {
     /// 
     /// This is useful as a way to avoid blocking with `wait_send` when setting up the publisher
     /// 
-    pub fn when_ready(&mut self) -> impl Future<Output=Result<(), oneshot::Canceled>> {
+    pub fn when_fully_subscribed(&mut self) -> impl Future<Output=Result<(), oneshot::Canceled>> {
         let receiver =  if self.insufficient_subscribers {
             // Return a future that will be notified when we have enough subscribers
             let (sender, receiver) = oneshot::channel();
@@ -89,11 +81,7 @@ impl<Message: 'static+Send+Clone> PublisherSink<Message> for BlockingPublisher<M
             // We now have enough subscribers
             self.insufficient_subscribers = false;
             
-            // Notify anything that is blocking on this publisher
-            self.notify_full.take().map(|notify| notify.wake());
-            self.notify_complete.take().map(|notify| notify.wake());
-
-            // Mark any futures that are waiting on this publisher
+            // Notify any futures that are waiting on this publisher
             self.notify_futures.drain(..)
                 .for_each(|sender| { sender.send(()).ok(); });
         }
@@ -101,33 +89,46 @@ impl<Message: 'static+Send+Clone> PublisherSink<Message> for BlockingPublisher<M
         // Result is our new subscription
         subscription
     }
-}
 
-/*
-impl<Message: Clone> Sink for BlockingPublisher<Message> {
-    type SinkItem   = Message;
-    type SinkError  = ();
-
-    fn start_send(&mut self, item: Message) -> StartSend<Message, ()> {
-        if self.insufficient_subscribers {
-            // Not enough subscribers, so refuse to send
-            self.notify_full = Some(task::current());
-            Ok(AsyncSink::NotReady(item))
+    ///
+    /// Reserves a space for a message with the subscribers, returning when it's ready
+    ///
+    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Message>> {
+        // If there are not enough subscribers, wait for there to be enough subscribers
+        let when_subscribed = if self.insufficient_subscribers {
+            Some(self.when_fully_subscribed())
         } else {
-            // Have reached the required number of subscribers, so pass through
-            self.publisher.start_send(item)
-        }
+            None
+        };
+        let when_ready = self.publisher.when_ready();
+
+        // Wait for there to be enough subscribers before waiting for the publisher to become ready
+        Box::pin(async move {
+            if let Some(when_subscribed) = when_subscribed {
+                when_subscribed.await.ok();
+            }
+
+            when_ready.await
+        })
     }
 
-    fn poll_complete(&mut self) -> Poll<(), ()> {
-        if self.insufficient_subscribers {
-            // Not enough subscribers, so refuse to send
-            self.notify_complete = Some(task::current());
-            Ok(Async::NotReady)
+    ///
+    /// Waits until all subscribers have consumed all pending messages
+    ///
+    fn when_empty(&mut self) -> BoxFuture<'static, ()> {
+        let when_subscribed = if self.insufficient_subscribers {
+            Some(self.when_fully_subscribed())
         } else {
-            // Have reached the required number of subscribers, so pass through to the main publisher
-            self.publisher.poll_complete()
-        }
+            None
+        };
+        let when_empty = self.publisher.when_empty();
+
+        Box::pin(async move {
+            if let Some(when_subscribed) = when_subscribed {
+                when_subscribed.await.ok();
+            }
+
+            when_empty.await
+        })
     }
 }
-*/

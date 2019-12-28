@@ -3,11 +3,8 @@ use super::subscriber::*;
 use super::publisher_sink::*;
 
 use futures::*;
-use futures::task;
-use futures::task::Task;
-use futures::future;
-use futures::future::Either;
-use futures::sync::oneshot;
+use futures::task::{Waker};
+use futures::channel::oneshot;
 
 ///
 /// A blocking publisher is a publisher that blocks messages until it has enough subscribers
@@ -27,10 +24,10 @@ pub struct BlockingPublisher<Message> {
     publisher: Publisher<Message>,
 
     /// Notification to be sent when there are enough subscribers in this publisher (waiting to send)
-    notify_full: Option<Task>,
+    notify_full: Option<Waker>,
 
     /// Notification to be sent when there are enough subscribers in this publisher (waiting for completion)
-    notify_complete: Option<Task>,
+    notify_complete: Option<Waker>,
 
     /// Futures to be notified when there are enough subscribers for this publisher
     notify_futures: Vec<oneshot::Sender<()>>
@@ -59,23 +56,30 @@ impl<Message: Clone> BlockingPublisher<Message> {
     /// 
     /// This is useful as a way to avoid blocking with `wait_send` when setting up the publisher
     /// 
-    pub fn when_ready(&mut self) -> impl Future<Item=(), Error=Canceled> {
-        if self.insufficient_subscribers {
+    pub fn when_ready(&mut self) -> impl Future<Output=Result<(), oneshot::Canceled>> {
+        let receiver =  if self.insufficient_subscribers {
             // Return a future that will be notified when we have enough subscribers
             let (sender, receiver) = oneshot::channel();
 
             // Notify when there are enough subscribers
             self.notify_futures.push(sender);
 
-            Either::A(receiver)
+            Some(receiver)
         } else {
-            // Already ready
-            Either::B(future::ok(()))
+            None
+        };
+
+        async {
+            if let Some(receiver) = receiver {
+                receiver.await
+            } else {
+                Ok(())
+            }
         }
     }
 }
 
-impl<Message: Clone> PublisherSink<Message> for BlockingPublisher<Message> {
+impl<Message: 'static+Send+Clone> PublisherSink<Message> for BlockingPublisher<Message> {
     fn subscribe(&mut self) -> Subscriber<Message> {
         // Create the subscription
         let subscription = self.publisher.subscribe();
@@ -86,8 +90,8 @@ impl<Message: Clone> PublisherSink<Message> for BlockingPublisher<Message> {
             self.insufficient_subscribers = false;
             
             // Notify anything that is blocking on this publisher
-            self.notify_full.take().map(|notify| notify.notify());
-            self.notify_complete.take().map(|notify| notify.notify());
+            self.notify_full.take().map(|notify| notify.wake());
+            self.notify_complete.take().map(|notify| notify.wake());
 
             // Mark any futures that are waiting on this publisher
             self.notify_futures.drain(..)
@@ -99,6 +103,7 @@ impl<Message: Clone> PublisherSink<Message> for BlockingPublisher<Message> {
     }
 }
 
+/*
 impl<Message: Clone> Sink for BlockingPublisher<Message> {
     type SinkItem   = Message;
     type SinkError  = ();
@@ -125,3 +130,4 @@ impl<Message: Clone> Sink for BlockingPublisher<Message> {
         }
     }
 }
+*/

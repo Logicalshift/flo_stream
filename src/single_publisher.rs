@@ -2,6 +2,8 @@ use super::subscriber::*;
 use super::pubsub_core::*;
 use super::publisher_sink::*;
 
+use futures::future::{BoxFuture};
+
 use std::sync::*;
 use std::collections::{HashMap, VecDeque};
 
@@ -54,7 +56,7 @@ impl<Message> SinglePublisher<Message> {
     }
 }
 
-impl<Message: 'static+Send> PublisherSink<Message> for SinglePublisher<Message> {
+impl<Message: 'static+Send+Clone> PublisherSink<Message> for SinglePublisher<Message> {
     ///
     /// Subscribes to this publisher
     /// 
@@ -93,6 +95,22 @@ impl<Message: 'static+Send> PublisherSink<Message> for SinglePublisher<Message> 
 
         // Create the subscriber
         Subscriber::new(pub_core, sub_core)
+    }
+
+    ///
+    /// Reserves a space for a message with the subscribers, returning when it's ready
+    ///
+    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Message>> {
+        let when_ready  = PubCore::send_single_subscriber(&self.core);
+
+        Box::pin(when_ready)
+    }
+
+    ///
+    /// Waits until all subscribers have consumed all pending messages
+    ///
+    fn when_empty(&mut self) -> BoxFuture<'static, ()> {
+        unimplemented!()
     }
 }
 

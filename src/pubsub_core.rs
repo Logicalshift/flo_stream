@@ -175,7 +175,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             for (id, subscriber, sub_core) in subscribers.iter_mut() {
                 if !reserved_ids.contains(id) {
                     // We haven't already reserved a slot in this queue
-                    if sub_core.queue_size() >= core.max_queue_size {
+                    if sub_core.queue_size() >= pub_core.max_queue_size {
                         // The queue is full: we need to wait for this subscriber to have a slot ready
                         sub_core.notify_ready.push(context.waker().clone());
                         return Poll::Pending;

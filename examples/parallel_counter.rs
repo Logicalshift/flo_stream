@@ -1,3 +1,6 @@
+fn main() { unimplemented!("TODO") }
+
+/*
 extern crate desync;
 extern crate flo_stream;
 extern crate futures;
@@ -77,3 +80,4 @@ fn main() {
     // Notify about the final count when we're done
     final_count.sync(|count| println!("Final count was {}", count));
 }
+*/

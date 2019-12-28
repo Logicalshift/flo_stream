@@ -164,6 +164,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
 
         future::poll_fn(move |context| {
             // Lock the core and all of the subscribers
+            let core            = Arc::clone(&core);
             let pub_core        = core.lock().unwrap();
             let mut subscribers = pub_core.subscribers.iter()
                 .map(|(id, subscriber)| {

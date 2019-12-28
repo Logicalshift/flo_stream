@@ -13,8 +13,9 @@ keywords        = ["pubsub", "futures", "concurrency"]
 categories      = ["concurrency","asynchronous","algorithms","data-structures"]
 
 [dependencies]
-futures = "0.3"
+futures     = "0.3"
+smallvec    = "1.1"
 
 [dev-dependencies]
-desync  = "0.5"
-rand    = "0.6"
+desync      = "0.5"
+rand        = "0.6"

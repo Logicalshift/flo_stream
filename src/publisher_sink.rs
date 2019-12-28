@@ -74,7 +74,7 @@ impl<Message> MessageSender<Message> {
     #[inline]
     pub fn send(self, message: Message) {
         self.sent = true;
-        (self.send_message)(message)
+        (self.send_message)(message);
     }
 }
 

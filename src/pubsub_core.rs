@@ -214,6 +214,73 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
     }
 
     ///
+    /// Sends to all subscribers, expiring the oldest unsent message
+    ///
+    pub fn send_all_expiring_oldest(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>> {
+        let core                = Arc::clone(arc_self);
+        let mut reserved_ids    = HashSet::new();
+
+        future::poll_fn(move |context| {
+            // Lock the core and all of the subscribers
+            let core            = Arc::clone(&core);
+            let pub_core        = core.lock().unwrap();
+            let mut subscribers = pub_core.subscribers.iter()
+                .map(|(id, subscriber)| {
+                    (*id, subscriber, subscriber.lock().unwrap())
+                })
+                .collect::<SmallVec<[_; 8]>>();
+
+            // Check that all subscribers have a free slot
+            for (id, subscriber, sub_core) in subscribers.iter_mut() {
+                if !reserved_ids.contains(id) {
+                    // We haven't already reserved a slot in this queue
+                    if sub_core.queue_size() >= pub_core.max_queue_size && sub_core.waiting.len() == 0 {
+                        // The queue is full of messages that have not been generated yet. We need to wait for it to become ready or for a
+                        // waiting item to be pushed.
+                        sub_core.notify_ready.push(context.waker().clone());
+                        sub_core.notify_waiting.push(context.waker().clone());
+                        return Poll::Pending;
+                    } else if sub_core.queue_size() >= pub_core.max_queue_size {
+                        // The queue is full but we can discard a message
+                        sub_core.waiting.pop_front();
+
+                        // Reserve our space instead
+                        sub_core.reserved += 1;
+                        reserved_ids.insert(id);
+                    } else {
+                        // This subscriber has a slot available: reserve it for us
+                        // TODO: if the future is dropped we need to return these reservations to their respective cores
+                        sub_core.reserved += 1;
+                        reserved_ids.insert(id);
+                    }
+                }
+            }
+
+            // All subscribers have a slot reserved for this message: create the sender
+            // In the event a new subscriber is created between the future completing and the sender being notified of its message
+            // we will not send the message to that subscriber
+            let all_subscribers     = subscribers.iter().map(|(_, subscriber, _)| Arc::clone(subscriber));
+            let all_subscribers     = all_subscribers.collect::<SmallVec<[_; 8]>>();
+            let all_subscribers     = Arc::new(all_subscribers);
+            let all_subscribers1    = all_subscribers;
+            let all_subscribers2    = Arc::clone(&all_subscribers1);
+
+            let sender              = MessageSender::new(move |message| {
+                // Lock the core while we send to the subscribers (so only one sender can be active at once)
+                let _pub_core = core.lock().unwrap();
+
+                // Send the message via all the subscribers
+                (*all_subscribers1).iter().for_each(|subscriber| SubCore::send_message(subscriber, &message));
+            },
+            move || { 
+                (*all_subscribers2).iter().for_each(|subscriber| SubCore::cancel_send(subscriber));
+            });
+            
+            Poll::Ready(sender)
+        })
+    }
+
+    ///
     /// Returns a future that will return when all of the subscribers have no data left to process
     ///
     pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()> {
@@ -243,30 +310,5 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             // All subscribers are empty
             Poll::Ready(())
         })
-    }
-
-    ///
-    /// Removes the oldest message from any subscribers that are full and then attempts to publish new message.
-    /// 
-    pub fn publish_expiring_oldest(&mut self, message: &Message, context: &task::Context) -> Option<Vec<Waker>> {
-        {
-            let max_queue_size = self.max_queue_size;
-            
-            // Lock all of the subscribers
-            let mut subscribers = self.subscribers.values()
-                .map(|subscriber| subscriber.lock().unwrap())
-                .collect::<Vec<_>>();
-
-            // Expire messages from any subscribers with a full queue
-            for subscriber in subscribers.iter_mut() {
-                if subscriber.waiting.len() >= max_queue_size {
-                    subscriber.waiting.pop_front();
-                }
-            }
-        }
-
-        // Publish the message
-        // self.publish(message, context)
-        unimplemented!()
     }
 }

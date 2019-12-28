@@ -2,6 +2,8 @@ use super::subscriber::*;
 use super::pubsub_core::*;
 use super::publisher_sink::*;
 
+use futures::future::{BoxFuture};
+
 use std::sync::*;
 use std::collections::{HashMap, VecDeque};
 
@@ -108,6 +110,24 @@ impl<Message: 'static+Send+Clone> PublisherSink<Message> for ExpiringPublisher<M
         // Create the subscriber
         Subscriber::new(pub_core, sub_core)
     }
+
+    ///
+    /// Reserves a space for a message with the subscribers, returning when it's ready
+    ///
+    fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Message>> {
+        let when_ready  = PubCore::send_all_expiring_oldest(&self.core);
+
+        Box::pin(when_ready)
+    }
+
+    ///
+    /// Waits until all subscribers have consumed all pending messages
+    ///
+    fn when_empty(&mut self) -> BoxFuture<'static, ()> {
+        let when_empty  = PubCore::when_empty(&self.core);
+
+        Box::pin(when_empty)
+    }
 }
 
 impl<Message> Drop for ExpiringPublisher<Message> {
@@ -145,36 +165,3 @@ impl<Message> Drop for ExpiringPublisher<Message> {
         to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }
-
-/*
-impl<Message: Clone> Sink for ExpiringPublisher<Message> {
-    type SinkItem   = Message;
-    type SinkError  = ();
-
-    fn start_send(&mut self, item: Message) -> StartSend<Message, ()> {
-        // Publish the message to the core
-        let notify = { self.core.lock().unwrap().publish_expiring_oldest(&item) };
-
-        if let Some(notify) = notify {
-            // Notify all the subscribers that the item has been published
-            notify.into_iter().for_each(|notify| notify.notify());
-
-            // Message sent
-            Ok(AsyncSink::Ready)
-        } else {
-            // At least one subscriber has a full queue, so the message could not be sent
-            Ok(AsyncSink::NotReady(item))
-        }
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), ()> {
-        if self.core.lock().unwrap().complete() {
-            // All subscribers are ready to receive a message
-            Ok(Async::Ready(()))
-        } else {
-            // At least one subscriber has a full buffer
-            Ok(Async::NotReady)
-        }
-    }
-}
-*/

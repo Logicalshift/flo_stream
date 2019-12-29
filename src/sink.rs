@@ -42,6 +42,27 @@ where Publisher: MessagePublisher {
     pub fn subscribe(&mut self) -> Subscriber<Publisher::Message> {
         self.publisher.subscribe()
     }
+
+    ///
+    /// Reserves a space for a message with the subscribers, returning when it's ready
+    ///
+    pub fn when_ready(&mut self) -> BoxFuture<'static, MessageSender<Publisher::Message>> {
+        self.publisher.when_ready()
+    }
+
+    ///
+    /// Waits until all subscribers have consumed all pending messages
+    ///
+    pub fn when_empty(&mut self) -> BoxFuture<'static, ()> {
+        self.publisher.when_empty()
+    }
+
+    ///
+    /// Publishes a message to the subscribers of this object 
+    ///
+    pub fn publish(&mut self, message: Publisher::Message) -> BoxFuture<'static, ()> {
+        self.publisher.publish(message)
+    }
 }
 
 impl<Publisher> Sink<Publisher::Message> for PublisherSink<Publisher>

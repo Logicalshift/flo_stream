@@ -4,6 +4,7 @@ extern crate flo_stream;
 use flo_stream::*;
 
 use futures::*;
+use futures::stream;
 use futures::executor;
 use futures::task::{ArcWake};
 
@@ -318,5 +319,20 @@ fn expiring_removes_oldest_events_first() {
         assert!(subscriber.next().await == Some(97));
         assert!(subscriber.next().await == Some(98));
         assert!(subscriber.next().await == Some(99));
+    })
+}
+
+#[test]
+fn send_all_stream() {
+    let mut publisher   = Publisher::<i32>::new(10);
+    let mut subscriber  = publisher.subscribe();
+
+    executor::block_on(async {
+        let stream = stream::iter(vec![1, 2, 3]);
+        publisher.send_all(stream).await;
+
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
     })
 }

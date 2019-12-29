@@ -36,6 +36,24 @@ fn receive_on_one_subscriber() {
 }
 
 #[test]
+fn republish_3_times() {
+    let mut publisher1  = Publisher::new(10);
+    let mut publisher2  = publisher1.republish();
+    let mut publisher3  = publisher2.republish();
+    let mut subscriber  = publisher1.subscribe();
+
+    executor::block_on(async {
+        publisher1.publish(1).await;
+        publisher2.publish(2).await;
+        publisher3.publish(3).await;
+
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
+    })
+}
+
+#[test]
 fn complete_when_empty() {
     let mut publisher   = Publisher::new(10);
     let mut subscriber  = publisher.subscribe();

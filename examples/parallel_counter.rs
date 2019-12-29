@@ -47,7 +47,7 @@ fn main() {
 
     // Create 5 workers to receive work from the publisher
     let workers = (0..5).into_iter()
-        .map(|_| count_zeros(work_publisher.subscribe()))
+        .map(|_| count_zeros(work_publisher.subscribe().unwrap()))
         .collect::<Vec<_>>();
 
     // Input stream is 10,000,000 random numbers (in a release build you might want to try 100_000_000 or more)

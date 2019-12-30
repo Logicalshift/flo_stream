@@ -7,7 +7,9 @@ use futures::*;
 use futures::stream;
 use futures::executor;
 use futures::task::{ArcWake};
+use futures::channel::mpsc;
 
+use std::mem;
 use std::thread;
 use std::sync::*;
 use std::sync::mpsc::channel;
@@ -354,3 +356,40 @@ fn send_all_stream() {
         assert!(subscriber.next().await == Some(3));
     })
 }
+
+#[test]
+fn drop_publisher_after_send_all() {
+    let mut publisher   = Publisher::<i32>::new(10);
+    let mut subscriber  = publisher.subscribe();
+
+    executor::block_on(async {
+        let stream = stream::iter(vec![1, 2, 3]);
+        publisher.send_all(stream).await;
+        mem::drop(publisher);
+
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
+        assert!(subscriber.next().await == None);
+    })
+}
+
+/*
+#[test]
+fn send_all_drops_stream_when_publisher_dropped() {
+    let mut publisher   = Publisher::<i32>::new(10);
+    let mut subscriber  = publisher.subscribe();
+
+    executor::block_on(async {
+        let (mut tx, rx) = mpsc::channel(1);
+
+        let _send_all = publisher.send_all(rx);
+        tx.send(1).await.unwrap();
+
+        assert!(subscriber.next().await == Some(1));
+        mem::drop(publisher);
+
+        //assert!(tx.send(2).await.is_err());
+    })
+}
+*/

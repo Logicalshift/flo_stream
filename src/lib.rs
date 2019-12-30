@@ -51,6 +51,7 @@ mod subscriber;
 mod pubsub_core;
 mod spawn;
 mod stream_publisher;
+mod weak_publisher;
 
 pub use self::message_publisher::*;
 pub use self::publisher::*;
@@ -61,3 +62,4 @@ pub use self::single_publisher::*;
 pub use self::subscriber::*;
 pub use self::spawn::*;
 pub use self::stream_publisher::*;
+pub use self::weak_publisher::*;

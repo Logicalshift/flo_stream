@@ -1,5 +1,6 @@
 use super::subscriber::*;
 use super::pubsub_core::*;
+use super::weak_publisher::*;
 use super::message_publisher::*;
 
 use futures::future::{BoxFuture};
@@ -47,12 +48,25 @@ impl<Message: Clone> Publisher<Message> {
 
     ///
     /// Creates a duplicate publisher that can be used to publish to the same streams as this object
-    /// 
+    ///
     pub fn republish(&self) -> Self {
         self.core.lock().unwrap().publisher_count += 1;
 
         Publisher {
             core:   Arc::clone(&self.core)
+        }
+    }
+
+    ///
+    /// Creates a duplicate publisher that can be used to publish to the same streams as this object
+    /// 
+    /// This creates a 'weak' publisher, which will stop republishing once all of the 'strong' publishers have been dropped.
+    ///
+    pub fn republish_weak(&self) -> WeakPublisher<Message> {
+        self.core.lock().unwrap().publisher_count += 1;
+
+        WeakPublisher {
+            core:   Arc::downgrade(&self.core)
         }
     }
 }

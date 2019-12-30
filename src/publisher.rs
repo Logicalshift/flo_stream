@@ -63,8 +63,6 @@ impl<Message: Clone> Publisher<Message> {
     /// This creates a 'weak' publisher, which will stop republishing once all of the 'strong' publishers have been dropped.
     ///
     pub fn republish_weak(&self) -> WeakPublisher<Message> {
-        self.core.lock().unwrap().publisher_count += 1;
-
         WeakPublisher {
             core:   Arc::downgrade(&self.core)
         }

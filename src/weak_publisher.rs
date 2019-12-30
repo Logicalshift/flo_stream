@@ -30,9 +30,6 @@ impl<Message: Clone> WeakPublisher<Message> {
     /// Creates a duplicate publisher that can be used to publish to the same streams as this object
     /// 
     pub fn republish(&self) -> Self {
-        self.core.upgrade()
-            .map(|core| core.lock().unwrap().publisher_count += 1);
-
         WeakPublisher {
             core:   Weak::clone(&self.core)
         }
@@ -127,45 +124,5 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
         } else {
             Box::pin(future::ready(()))
         }
-    }
-}
-
-impl<Message> Drop for WeakPublisher<Message> {
-    fn drop(&mut self) {
-        let to_notify = {
-            self.core.upgrade()
-                .map(|core| {
-                    // Lock the core
-                    let mut pub_core = core.lock().unwrap();
-
-                    // Check that this is the last publisher on this core
-                    pub_core.publisher_count -= 1;
-                    if pub_core.publisher_count == 0 {
-                        // Mark all the subscribers as unpublished and notify them so that they close
-                        let mut to_notify = vec![];
-
-                        for subscriber in pub_core.subscribers.values() {
-                            let mut subscriber = subscriber.lock().unwrap();
-
-                            // Unpublish the subscriber (so that it hits the end of the stream)
-                            subscriber.published    = false;
-                            subscriber.notify_ready = vec![];
-
-                            // Add to the things to notify once the lock is released
-                            to_notify.extend(subscriber.notify_waiting.drain(..));
-                        }
-
-                        // Return the notifications outside of the lock
-                        to_notify
-                    } else {
-                        // This is not the last core
-                        vec![]
-                    }
-                })
-                .unwrap_or(vec![])
-        };
-
-        // Notify any subscribers that are waiting that we're unpublished
-        to_notify.into_iter().for_each(|notify| notify.wake());
     }
 }

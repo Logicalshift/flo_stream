@@ -1,6 +1,7 @@
 extern crate futures;
 extern crate flo_stream;
 
+use ::desync::*;
 use flo_stream::*;
 
 use futures::*;
@@ -374,22 +375,70 @@ fn drop_publisher_after_send_all() {
     })
 }
 
-/*
+#[test]
+fn drop_publisher_with_weak_publisher_after_publish() {
+    let mut publisher       = Publisher::<i32>::new(10);
+    let mut weak_publisher  = publisher.republish_weak();
+    let mut subscriber      = publisher.subscribe();
+
+    executor::block_on(async {
+        weak_publisher.publish(1).await;
+        weak_publisher.publish(2).await;
+        weak_publisher.publish(3).await;
+        mem::drop(publisher);
+
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
+        assert!(subscriber.next().await == None);
+
+        weak_publisher.publish(4).await;
+    })
+}
+
+#[test]
+fn drop_publisher_with_weak_publisher_after_send_all() {
+    let mut publisher       = Publisher::<i32>::new(10);
+    let mut weak_publisher  = publisher.republish_weak();
+    let mut subscriber      = publisher.subscribe();
+
+    executor::block_on(async {
+        let stream = stream::iter(vec![1, 2, 3]);
+        publisher.send_all(stream).await;
+        mem::drop(publisher);
+
+        assert!(subscriber.next().await == Some(1));
+        assert!(subscriber.next().await == Some(2));
+        assert!(subscriber.next().await == Some(3));
+        assert!(subscriber.next().await == None);
+
+        weak_publisher.publish(4).await;
+    })
+}
+
 #[test]
 fn send_all_drops_stream_when_publisher_dropped() {
-    let mut publisher   = Publisher::<i32>::new(10);
-    let mut subscriber  = publisher.subscribe();
+    let mut publisher       = Publisher::<i32>::new(10);
+    let mut weak_publisher  = publisher.republish_weak();
+    let mut subscriber      = publisher.subscribe();
+    let sender              = Desync::new(());
 
     executor::block_on(async {
         let (mut tx, rx) = mpsc::channel(1);
 
-        let _send_all = publisher.send_all(rx);
-        tx.send(1).await.unwrap();
+        // Create a future to send all of the data
+        sender.desync(move |_| {
+            executor::block_on(weak_publisher.send_all(rx));
+        });
 
+        // Send a value while the publisher exists
+        tx.send(1).await.unwrap();
         assert!(subscriber.next().await == Some(1));
+
+        // Drop the publisher
         mem::drop(publisher);
 
-        //assert!(tx.send(2).await.is_err());
+        // Should not be able to send any more as only the weak publisher still exists
+        assert!(tx.send(2).await.is_err());
     })
 }
-*/

@@ -418,6 +418,8 @@ fn drop_publisher_with_weak_publisher_after_send_all() {
 
 #[test]
 fn send_all_drops_stream_when_publisher_dropped() {
+    use std::time::Duration;
+
     let mut publisher       = Publisher::<i32>::new(10);
     let mut weak_publisher  = publisher.republish_weak();
     let mut subscriber      = publisher.subscribe();
@@ -438,7 +440,11 @@ fn send_all_drops_stream_when_publisher_dropped() {
         // Drop the publisher
         mem::drop(publisher);
 
+        // The sending stream will exist until it's woken again right now, so send one value and wait for it to shut down
+        assert!(tx.send(2).await.is_ok());
+        thread::sleep(Duration::from_millis(20));
+
         // Should not be able to send any more as only the weak publisher still exists
-        // assert!(tx.send(2).await.is_err()); TODO
+        assert!(tx.send(3).await.is_err());
     })
 }

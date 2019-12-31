@@ -15,6 +15,7 @@ categories      = ["concurrency","asynchronous","algorithms","data-structures"]
 [dependencies]
 futures     = "0.3"
 smallvec    = "1.1"
+lazy_static = "1.0"
 
 [dev-dependencies]
 desync      = "0.5"

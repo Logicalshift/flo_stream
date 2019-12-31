@@ -47,6 +47,11 @@ where   Self:       Send {
     fn is_closed(&self) -> bool;
 
     ///
+    /// Future that returns when this publisher is closed
+    ///
+    fn when_closed(&self) -> BoxFuture<'static, ()>;
+
+    ///
     /// Publishes a message to the subscribers of this object 
     ///
     fn publish(&mut self, message: Self::Message) -> BoxFuture<'static, ()> {

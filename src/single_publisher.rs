@@ -28,6 +28,7 @@ impl<Message> SinglePublisher<Message> {
             next_subscriber_id: 0,
             publisher_count:    1,
             subscribers:        HashMap::new(),
+            notify_closed:      HashMap::new(),
             max_queue_size:     buffer_size
         };
 
@@ -121,6 +122,13 @@ impl<Message: 'static+Send+Clone> MessagePublisher for SinglePublisher<Message> 
     /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
     ///
     fn is_closed(&self) -> bool { false }
+
+    ///
+    /// Future that returns when this publisher is closed
+    ///
+    fn when_closed(&self) -> BoxFuture<'static, ()> {
+        Box::pin(CoreClosedFuture::new(Arc::clone(&self.core)))
+    }
 }
 
 impl<Message> Drop for SinglePublisher<Message> {
@@ -133,7 +141,9 @@ impl<Message> Drop for SinglePublisher<Message> {
             pub_core.publisher_count -= 1;
             if pub_core.publisher_count == 0 {
                 // Mark all the subscribers as unpublished and notify them so that they close
-                let mut to_notify = vec![];
+                let mut to_notify = pub_core.notify_closed.drain()
+                    .map(|(_id, waker)| waker)
+                    .collect::<Vec<_>>();
 
                 for subscriber in pub_core.subscribers.values() {
                     let mut subscriber = subscriber.lock().unwrap();

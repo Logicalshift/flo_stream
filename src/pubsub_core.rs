@@ -2,9 +2,10 @@ use super::message_publisher::*;
 
 use futures::future;
 use futures::future::{Future};
-use futures::task::{Waker, Poll};
+use futures::task::{Waker, Poll, Context};
 use smallvec::*;
 
+use std::pin::*;
 use std::sync::*;
 use std::collections::{VecDeque, HashMap, HashSet};
 
@@ -23,6 +24,9 @@ pub (super) struct PubCore<Message> {
 
     /// The maximum size of queue to allow in any one subscriber
     pub max_queue_size: usize,
+
+    /// Wakers to notify when this core is closed
+    pub notify_closed: HashMap<usize, Waker>
 }
 
 ///
@@ -48,7 +52,7 @@ pub (super) struct SubCore<Message> {
     pub notify_ready: Vec<Waker>,
 
     /// If the publisher is waiting for this subscriber to complete, this is the notification to send
-    pub notify_complete: Vec<Waker>
+    pub notify_complete: Vec<Waker>,
 }
 
 impl<Message: Clone> SubCore<Message> {
@@ -300,5 +304,71 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             // All subscribers are empty
             Poll::Ready(())
         })
+    }
+}
+
+lazy_static! {
+    pub static ref NEXT_CLOSE_FUTURE_ID: Mutex<usize> = Mutex::new(0);
+}
+
+///
+/// Future that is used to notify when a pubcore is closed
+///
+pub (crate) struct CoreClosedFuture<Message> {
+    /// ID of this future (used to remove the waker if the future is dropped)
+    id: usize,
+
+    /// The core that this future belongs to
+    core: Weak<Mutex<PubCore<Message>>>
+}
+
+impl<Message> CoreClosedFuture<Message> {
+    pub (crate) fn new(core: Arc<Mutex<PubCore<Message>>>) -> CoreClosedFuture<Message> {
+        // Get an ID for this future
+        let next_id = {
+            let mut id = NEXT_CLOSE_FUTURE_ID.lock().unwrap();
+            let next_id = *id;
+            *id += 1;
+
+            next_id
+        };
+
+        // The core future maintains a weak reference to the core
+        CoreClosedFuture {
+            id:     next_id,
+            core:   Arc::downgrade(&core)
+        }
+    }
+}
+
+impl<Message> Drop for CoreClosedFuture<Message> {
+    fn drop(&mut self) {
+        if let Some(core) = self.core.upgrade() {
+            core.lock().unwrap().notify_closed.remove(&self.id);
+        }
+    }
+}
+
+impl<Message> Future for CoreClosedFuture<Message> {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<()> {
+        let self_ref = self.as_mut();
+
+        if let Some(core) = self_ref.core.upgrade() {
+            let mut core = core.lock().unwrap();
+
+            if core.publisher_count == 0 {
+                // Core has been closed if the publisher count reaches 0
+                Poll::Ready(())
+            } else {
+                // Wake when the core is closed
+                core.notify_closed.insert(self.id, context.waker().clone());
+                Poll::Pending
+            }
+        } else {
+            // Core has been closed if the reference count reaches 0
+            Poll::Ready(())
+        }
     }
 }

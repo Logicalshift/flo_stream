@@ -137,5 +137,12 @@ impl<Message: 'static+Send+Clone> MessagePublisher for BlockingPublisher<Message
     ///
     /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
     ///
-    fn is_closed(&self) -> bool { false }
+    fn is_closed(&self) -> bool { self.publisher.is_closed() }
+
+    ///
+    /// Future that returns when this publisher is closed
+    ///
+    fn when_closed(&self) -> BoxFuture<'static, ()> {
+        self.publisher.when_closed()
+    }
 }

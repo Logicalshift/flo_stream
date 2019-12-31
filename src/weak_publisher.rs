@@ -132,4 +132,15 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
     fn is_closed(&self) -> bool { 
         self.core.upgrade().is_none()
     }
+
+    ///
+    /// Future that returns when this publisher is closed
+    ///
+    fn when_closed(&self) -> BoxFuture<'static, ()> {
+        if let Some(core) = self.core.upgrade() {
+            Box::pin(CoreClosedFuture::new(core))
+        } else {
+            Box::pin(future::ready(()))
+        }
+    }
 }

@@ -14,6 +14,9 @@ pub struct StreamPublisher<'a, Publisher, SourceStream> {
     /// The publisher where the stream will be sent to
     publisher: &'a mut Publisher,
 
+    /// Future that's polled when the publisher is closed
+    when_closed: BoxFuture<'static, ()>,
+
     /// The stream that is being sent to the publisher
     stream: Pin<Box<SourceStream>>,
 
@@ -29,6 +32,7 @@ where   Publisher:      MessagePublisher,
     ///
     pub fn new(publisher: &'a mut Publisher, stream: SourceStream) -> StreamPublisher<'a, Publisher, SourceStream> {
         StreamPublisher {
+            when_closed:            publisher.when_closed(),
             publisher:              publisher,
             stream:                 Box::pin(stream),
             currently_publishing:   None
@@ -55,6 +59,9 @@ where   Publisher:      MessagePublisher,
                 Poll::Ready(()) => { }
             }
         }
+
+        // Poll when_closed (we check the flag later so the result of this future doesn't matter right now: we just need to make sure it wakes us)
+        let _when_closed = self.when_closed.poll_unpin(context);
 
         // Attempt to read a value from the stream
         loop {

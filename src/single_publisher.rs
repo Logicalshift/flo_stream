@@ -116,6 +116,11 @@ impl<Message: 'static+Send+Clone> MessagePublisher for SinglePublisher<Message> 
 
         Box::pin(when_empty)
     }
+
+    ///
+    /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
+    ///
+    fn is_closed(&self) -> bool { false }
 }
 
 impl<Message> Drop for SinglePublisher<Message> {

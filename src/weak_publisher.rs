@@ -125,4 +125,11 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
             Box::pin(future::ready(()))
         }
     }
+
+    ///
+    /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
+    ///
+    fn is_closed(&self) -> bool { 
+        self.core.upgrade().is_none()
+    }
 }

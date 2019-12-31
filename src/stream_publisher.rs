@@ -58,6 +58,11 @@ where   Publisher:      MessagePublisher,
 
         // Attempt to read a value from the stream
         loop {
+            if self.publisher.is_closed() {
+                // If the publisher has closed, then immediately complete the future (and stop reading from the stream)
+                return Poll::Ready(());
+            }
+
             match self.stream.poll_next_unpin(context) {
                 Poll::Pending => {
                     // Stream is waiting to send more data

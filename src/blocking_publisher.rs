@@ -133,4 +133,9 @@ impl<Message: 'static+Send+Clone> MessagePublisher for BlockingPublisher<Message
             when_empty.await
         })
     }
+
+    ///
+    /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
+    ///
+    fn is_closed(&self) -> bool { false }
 }

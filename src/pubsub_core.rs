@@ -55,7 +55,7 @@ pub (super) struct SubCore<Message> {
     pub notify_complete: Vec<Waker>,
 }
 
-impl<Message: Clone> SubCore<Message> {
+impl<Message> SubCore<Message> {
     ///
     /// Returns the current size of the queue in this subscriber
     ///
@@ -83,6 +83,26 @@ impl<Message: Clone> SubCore<Message> {
     ///
     /// Sends a message to this core, reducing the reserved count and notifying anything that's waiting for the core to wake up
     ///
+    fn send_single_message(arc_self: &Arc<Mutex<SubCore<Message>>>, message: Message) {
+        let waiting_wakers = {
+            // Add the message to the waiting list
+            let mut sub_core    = arc_self.lock().unwrap();
+            sub_core.reserved   -= 1;
+            sub_core.waiting.push_back(message);
+
+            // Wake anything that was waiting for a new message
+            sub_core.notify_waiting.drain(..).collect::<SmallVec<[_; 8]>>()
+        };
+
+        // Notify all of the wakers
+        waiting_wakers.into_iter().for_each(|waiting_waker| waiting_waker.wake());
+    }
+}
+
+impl<Message: Clone> SubCore<Message> {
+    ///
+    /// Sends a message to this core, reducing the reserved count and notifying anything that's waiting for the core to wake up
+    ///
     fn send_message(arc_self: &Arc<Mutex<SubCore<Message>>>, message: &Message) {
         let waiting_wakers = {
             // Add the message to the waiting list
@@ -99,7 +119,7 @@ impl<Message: Clone> SubCore<Message> {
     }
 }
 
-impl<Message: 'static+Clone+Send> PubCore<Message> {
+impl<Message: 'static+Send> PubCore<Message> {
     ///
     /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
     ///
@@ -128,7 +148,7 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
                     // Create the structure that will send the message when it's ready
                     let sender      = MessageSender::new(move |message| {
                         // Send the message to this core
-                        SubCore::send_message(&subscriber1, &message);
+                        SubCore::send_single_message(&subscriber1, message);
                     }, move || {
                         // Cancel the send and allow something else to take the slot
                         SubCore::cancel_send(&subscriber2);
@@ -146,6 +166,40 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
         })
     }
 
+    ///
+    /// Returns a future that will return when all of the subscribers have no data left to process
+    ///
+    pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()> {
+        let core                = Arc::clone(arc_self);
+
+        future::poll_fn(move |context| {
+            // Lock the core and all of the subscribers
+            let core            = Arc::clone(&core);
+            let pub_core        = core.lock().unwrap();
+            let mut subscribers = pub_core.subscribers.iter()
+                .map(|(id, subscriber)| {
+                    (*id, subscriber, subscriber.lock().unwrap())
+                })
+                .collect::<SmallVec<[_; 8]>>();
+
+            // Check that all subscribers are empty (wait on the first that's not)
+            for (_id, _subscriber, sub_core) in subscribers.iter_mut() {
+                if sub_core.queue_size() > 0 {
+                    // Wake when this subscriber becomes ready to check again
+                    sub_core.notify_ready.push(context.waker().clone());
+
+                    // Wait for this subscriber to empty
+                    return Poll::Pending;
+                }
+            }
+
+            // All subscribers are empty
+            Poll::Ready(())
+        })
+    }
+}
+
+impl<Message: 'static+Send+Clone> PubCore<Message> {
     ///
     /// Waits for all of the subscribers to become available and returns a sender that will send a message to all of them
     /// at once
@@ -271,38 +325,6 @@ impl<Message: 'static+Clone+Send> PubCore<Message> {
             });
             
             Poll::Ready(sender)
-        })
-    }
-
-    ///
-    /// Returns a future that will return when all of the subscribers have no data left to process
-    ///
-    pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()> {
-        let core                = Arc::clone(arc_self);
-
-        future::poll_fn(move |context| {
-            // Lock the core and all of the subscribers
-            let core            = Arc::clone(&core);
-            let pub_core        = core.lock().unwrap();
-            let mut subscribers = pub_core.subscribers.iter()
-                .map(|(id, subscriber)| {
-                    (*id, subscriber, subscriber.lock().unwrap())
-                })
-                .collect::<SmallVec<[_; 8]>>();
-
-            // Check that all subscribers are empty (wait on the first that's not)
-            for (_id, _subscriber, sub_core) in subscribers.iter_mut() {
-                if sub_core.queue_size() > 0 {
-                    // Wake when this subscriber becomes ready to check again
-                    sub_core.notify_ready.push(context.waker().clone());
-
-                    // Wait for this subscriber to empty
-                    return Poll::Pending;
-                }
-            }
-
-            // All subscribers are empty
-            Poll::Ready(())
         })
     }
 }

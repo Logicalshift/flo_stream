@@ -57,7 +57,7 @@ impl<Message> SinglePublisher<Message> {
     }
 }
 
-impl<Message: 'static+Send+Clone> MessagePublisher for SinglePublisher<Message> {
+impl<Message: 'static+Send> MessagePublisher for SinglePublisher<Message> {
     type Message = Message;
 
     ///

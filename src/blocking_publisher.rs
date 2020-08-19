@@ -48,7 +48,7 @@ impl<Message: Clone> BlockingPublisher<Message> {
     /// 
     /// This is useful as a way to avoid blocking with `wait_send` when setting up the publisher
     /// 
-    pub fn when_fully_subscribed(&mut self) -> impl Future<Output=Result<(), oneshot::Canceled>> {
+    pub fn when_fully_subscribed(&mut self) -> impl Future<Output=Result<(), oneshot::Canceled>>+Send {
         let receiver =  if self.insufficient_subscribers {
             // Return a future that will be notified when we have enough subscribers
             let (sender, receiver) = oneshot::channel();

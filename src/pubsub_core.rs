@@ -123,7 +123,7 @@ impl<Message: 'static+Send> PubCore<Message> {
     ///
     /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
     ///
-    pub fn send_single_subscriber(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>> {
+    pub fn send_single_subscriber(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
         let core = Arc::clone(arc_self);
 
         future::poll_fn(move |context| {
@@ -169,7 +169,7 @@ impl<Message: 'static+Send> PubCore<Message> {
     ///
     /// Returns a future that will return when all of the subscribers have no data left to process
     ///
-    pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()> {
+    pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()>+Send {
         let core                = Arc::clone(arc_self);
 
         future::poll_fn(move |context| {
@@ -204,7 +204,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
     /// Waits for all of the subscribers to become available and returns a sender that will send a message to all of them
     /// at once
     ///
-    pub fn send_all_subscribers(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>> {
+    pub fn send_all_subscribers(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
         let core                = Arc::clone(arc_self);
         let mut reserved_ids    = HashSet::new();
 
@@ -263,7 +263,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
     ///
     /// Sends to all subscribers, expiring the oldest unsent message
     ///
-    pub fn send_all_expiring_oldest(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>> {
+    pub fn send_all_expiring_oldest(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
         let core                = Arc::clone(arc_self);
         let mut reserved_ids    = HashSet::new();
 

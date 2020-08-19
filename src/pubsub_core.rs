@@ -22,6 +22,9 @@ pub (super) struct PubCore<Message> {
     /// The subscribers to this publisher
     pub subscribers: HashMap<usize, Arc<Mutex<SubCore<Message>>>>,
 
+    /// The IDs of subscribers waiting to be sent messages (used when publishing to single subscribers, to ensure that we don't just fill the queue of the first subscriber)
+    pub waiting: Vec<usize>,
+
     /// The maximum size of queue to allow in any one subscriber
     pub max_queue_size: usize,
 
@@ -121,23 +124,14 @@ impl<Message: Clone> SubCore<Message> {
 
 impl<Message: 'static+Send> PubCore<Message> {
     ///
-    /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
+    /// Checks the waiting subscriber list for a subscriber ready to receive a message
     ///
-    pub fn send_single_subscriber(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
-        let core = Arc::clone(arc_self);
+    fn poll_waiting_subscribers(&mut self) -> Poll<MessageSender<Message>> {
+        while let Some(possible_subscriber) = self.waiting.pop() {
+            if let Some(subscriber) = self.subscribers.get(&possible_subscriber) {
+                let mut sub_core = subscriber.lock().unwrap();
 
-        future::poll_fn(move |context| {
-            // Lock the core and all of the subscribers
-            let core            = core.lock().unwrap();
-            let mut subscribers = core.subscribers.iter()
-                .map(|(id, subscriber)| {
-                    (*id, subscriber, subscriber.lock().unwrap())
-                })
-                .collect::<SmallVec<[_; 8]>>();
-
-            // Check for a subscriber with a free slot
-            for (_id, subscriber, sub_core) in subscribers.iter_mut() {
-                if sub_core.queue_size() < core.max_queue_size {
+                if sub_core.queue_size() < self.max_queue_size {
                     // This is the subscriber we're going to send to
                     let subscriber1 = Arc::clone(subscriber);
                     let subscriber2 = Arc::clone(subscriber);
@@ -157,12 +151,52 @@ impl<Message: 'static+Send> PubCore<Message> {
                     return Poll::Ready(sender);
                 }
             }
+        }
 
-            // Have the subscribers notify us when a slot becomes free
-            subscribers.iter_mut().for_each(|(_id, _subscriber, sub_core)| { sub_core.notify_ready.push(context.waker().clone()) });
+        // No subscriber was ready
+        Poll::Pending
+    }
 
-            // Pending on a subscriber becoming ready
-            Poll::Pending
+    ///
+    /// Fills the list of waiting subscriber IDs
+    ///
+    fn fill_waiting_subscribers(&mut self) {
+        self.waiting = self.subscribers.keys().map(|key| *key).collect();
+    }
+
+    ///
+    /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
+    ///
+    pub fn send_single_subscriber(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
+        let core = Arc::clone(arc_self);
+
+        future::poll_fn(move |context| {
+            // Lock the core and all of the subscribers
+            let mut core    = core.lock().unwrap();
+
+            // Check subscribers in the order in 'waiting' (so we send messages evenly to all subscribers)
+            if let Poll::Ready(sender) = core.poll_waiting_subscribers() {
+                // A waiting subscriber was ready
+                Poll::Ready(sender)
+            } else {
+                // Refill the list and try again (the waiting list may have been partially filled or out-of-date)
+                core.fill_waiting_subscribers();
+
+                if let Poll::Ready(sender) = core.poll_waiting_subscribers() {
+                    // A waiting subscriber was ready
+                    Poll::Ready(sender)
+                } else {
+                    // All subscribers have full queues
+
+                    // Notify when the subscriber queue becomes empty
+                    for (_id, subcore) in core.subscribers.iter() {
+                        subcore.lock().unwrap().notify_ready.push(context.waker().clone());
+                    }
+
+                    // Wake when a subscriber is available
+                    Poll::Pending
+                }
+            }
         })
     }
 

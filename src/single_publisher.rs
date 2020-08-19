@@ -29,6 +29,7 @@ impl<Message> SinglePublisher<Message> {
             publisher_count:    1,
             subscribers:        HashMap::new(),
             notify_closed:      HashMap::new(),
+            waiting:            vec![],
             max_queue_size:     buffer_size
         };
 

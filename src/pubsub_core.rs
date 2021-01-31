@@ -104,9 +104,9 @@ impl<Message> SubCore<Message> {
 
 impl<Message: Clone> SubCore<Message> {
     ///
-    /// Sends a message to this core, reducing the reserved count and notifying anything that's waiting for the core to wake up
+    /// Queues a message on this core, returning the list of wakers that need to be notified once the message has finished sending
     ///
-    fn send_message(arc_self: &Arc<Mutex<SubCore<Message>>>, message: &Message) {
+    fn send_message(arc_self: &Arc<Mutex<SubCore<Message>>>, message: &Message) -> SmallVec<[Waker; 8]> {
         let waiting_wakers = {
             // Add the message to the waiting list
             let mut sub_core    = arc_self.lock().unwrap();
@@ -117,8 +117,8 @@ impl<Message: Clone> SubCore<Message> {
             sub_core.notify_waiting.drain(..).collect::<SmallVec<[_; 8]>>()
         };
 
-        // Notify all of the wakers
-        waiting_wakers.into_iter().for_each(|waiting_waker| waiting_waker.wake());
+        // Result is the list of wakers to be notified
+        waiting_wakers
     }
 }
 
@@ -280,11 +280,15 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
 
             let core                = Arc::clone(&core);
             let sender              = MessageSender::new(move |message| {
-                // Lock the core while we send to the subscribers (so only one sender can be active at once)
-                let _pub_core = core.lock().unwrap();
+                let waiting_wakers = {
+                    // Lock the core while we send to the subscribers (so only one sender can be active at once)
+                    let _pub_core = core.lock().unwrap();
 
-                // Send the message via all the subscribers
-                (*all_subscribers1).iter().for_each(|subscriber| SubCore::send_message(subscriber, &message));
+                    // Send the message via all the subscribers
+                    (*all_subscribers1).iter().flat_map(|subscriber| SubCore::send_message(subscriber, &message)).collect::<Vec<_>>()
+                };
+
+                waiting_wakers.into_iter().for_each(|waiting_waker| waiting_waker.wake());
             },
             move || { 
                 (*all_subscribers2).iter().for_each(|subscriber| SubCore::cancel_send(subscriber));
@@ -348,11 +352,15 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
             let core                = Arc::clone(&core);
 
             let sender              = MessageSender::new(move |message| {
-                // Lock the core while we send to the subscribers (so only one sender can be active at once)
-                let _pub_core = core.lock().unwrap();
+                let waiting_wakers = {
+                    // Lock the core while we send to the subscribers (so only one sender can be active at once)
+                    let _pub_core = core.lock().unwrap();
 
-                // Send the message via all the subscribers
-                (*all_subscribers1).iter().for_each(|subscriber| SubCore::send_message(subscriber, &message));
+                    // Send the message via all the subscribers
+                    (*all_subscribers1).iter().flat_map(|subscriber| SubCore::send_message(subscriber, &message)).collect::<Vec<_>>()
+                };
+
+                waiting_wakers.into_iter().for_each(|waiting_waker| waiting_waker.wake());
             },
             move || { 
                 (*all_subscribers2).iter().for_each(|subscriber| SubCore::cancel_send(subscriber));

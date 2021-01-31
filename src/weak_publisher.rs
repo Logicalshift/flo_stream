@@ -9,7 +9,13 @@ use std::sync::*;
 use std::collections::{VecDeque};
 
 ///
-/// A weak publisher is a publisher that 
+/// A weak publisher is a publisher that contains a weak reference to the shared core.
+/// It's typically created by calling `republish_weak` in a standard publisher.
+///
+/// Weak publishers stop publishing their messages once there are no strong publishers
+/// left. They're useful for event sources that want to publish events but which do not
+/// want to leave the subscriber streams open once the main event sources have gone
+/// away.
 ///
 pub struct WeakPublisher<Message> {
     /// The shared core of this publisher

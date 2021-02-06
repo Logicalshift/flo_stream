@@ -12,7 +12,7 @@ fn number_generator() {
             for num in 0u32..3 {
                 yield_value(num).await;
             }
-        }.boxed());
+        });
 
         // Just generates 0, 1, 2
         assert!(generated_stream.next().await == Some(0));
@@ -41,7 +41,7 @@ fn add_one_generator() {
                     break;
                 }
             }
-        }.boxed());
+        });
 
         // Send some numbers and retrieve the results
         numbers_in.send(1).await.unwrap();

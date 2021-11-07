@@ -55,6 +55,7 @@ mod spawn;
 mod stream_publisher;
 mod weak_publisher;
 mod generator;
+mod switching_stream;
 
 pub use self::message_publisher::*;
 pub use self::publisher::*;
@@ -67,3 +68,4 @@ pub use self::spawn::*;
 pub use self::stream_publisher::*;
 pub use self::weak_publisher::*;
 pub use self::generator::*;
+pub use self::switching_stream::*;

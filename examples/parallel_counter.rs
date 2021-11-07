@@ -22,22 +22,24 @@ fn main() {
 
         // Counts the number of 0s in the input vector, asynchronously
         pipe(worker, input, |_state, next| {
-            let mut count = 0;
+            async move {
+                let mut count = 0;
 
-            // Do 10ms of actual 'work' (busy waiting)
-            let mut _some_count = 0;
-            let start = time::SystemTime::now();
-            while time::SystemTime::now().duration_since(start).unwrap() < time::Duration::from_millis(10) {
-                _some_count += 1;
-            }
-            
-            for val in next {
-                if val == 0 {
-                    count += 1;
+                // Do 10ms of actual 'work' (busy waiting)
+                let mut _some_count = 0;
+                let start = time::SystemTime::now();
+                while time::SystemTime::now().duration_since(start).unwrap() < time::Duration::from_millis(10) {
+                    _some_count += 1;
                 }
-            }
+                
+                for val in next {
+                    if val == 0 {
+                        count += 1;
+                    }
+                }
 
-            Ok(count)
+                Ok(count)
+            }.boxed()
         })
     }
 
@@ -66,8 +68,10 @@ fn main() {
     let final_count = Arc::new(Desync::new(0));
     workers.into_iter().for_each(|worker| {
         pipe_in(final_count.clone(), worker, |state, next| {
-            *state += next.unwrap();
-            println!("So far: {}", *state);
+            async move {
+                *state += next.unwrap();
+                println!("So far: {}", *state);
+            }.boxed()
         });
     });
 

@@ -9,7 +9,14 @@ use std::sync::*;
 use std::collections::{VecDeque};
 
 ///
-/// A weak publisher is a publisher that 
+/// A weak publisher republishes a `Publisher` only so long as that `Publisher` exists.
+///
+/// This type of publisher can be created by calling `republish_weak()` on a `Publisher`. The subscribers will close if the
+/// `Publisher` is released even if the `WeakPublisher` still exists.
+///
+/// This is useful as a way to send messages to a stream without 'owning' it, where it's acceptable for the messages to be
+/// dropped once the target has gone away (eg: messages to a window in a user interface might not longer be relevant once
+/// the window has closed)
 ///
 pub struct WeakPublisher<Message> {
     /// The shared core of this publisher

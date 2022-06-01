@@ -1,4 +1,5 @@
 use super::subscriber::*;
+use super::try_publish_error::*;
 
 use futures::future::{BoxFuture};
 
@@ -52,6 +53,14 @@ where
     /// Future that returns when this publisher is closed
     ///
     fn when_closed(&self) -> BoxFuture<'static, ()>;
+
+    ///
+    /// Tries to publish a message immediately, returning an error if there's no space for it
+    ///
+    fn try_publish(&mut self, message: Self::Message) -> Result<(), TryPublishError<Self::Message>> {
+        // We can always fail with 'full'
+        Err(TryPublishError::with_error(message, PublishError::Full))
+    }
 
     ///
     /// Publishes a message to the subscribers of this object 

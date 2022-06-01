@@ -43,6 +43,7 @@
 extern crate lazy_static;
 extern crate futures;
 
+mod try_publish_error;
 mod message_publisher;
 mod publisher;
 mod sink;

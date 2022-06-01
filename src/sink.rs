@@ -11,7 +11,9 @@ use std::pin::{Pin};
 /// An implementation of the Sink trait that can be applied to publishers
 ///
 pub struct PublisherSink<Publisher>
-where Publisher: MessagePublisher {
+where 
+    Publisher: MessagePublisher
+{
     /// The publisher that is being turned into a sink
     publisher: Option<Publisher>,
 
@@ -26,7 +28,9 @@ where Publisher: MessagePublisher {
 }
 
 impl<Publisher> PublisherSink<Publisher> 
-where Publisher: MessagePublisher {
+where
+    Publisher: MessagePublisher
+{
     ///
     /// Provides access to the underlying MessagePublisher for this sink
     ///
@@ -70,8 +74,10 @@ where Publisher: MessagePublisher {
 }
 
 impl<Publisher> Sink<Publisher::Message> for PublisherSink<Publisher>
-where Publisher: MessagePublisher,
-Self: Unpin {
+where 
+    Publisher:  MessagePublisher,
+    Self:       Unpin,
+{
     type Error = ();
 
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context) -> Poll<Result<(), Self::Error>> {
@@ -170,7 +176,9 @@ pub trait ToPublisherSink : Sized+MessagePublisher {
 }
 
 impl<Publisher> ToPublisherSink for Publisher
-where Publisher: Sized+MessagePublisher {
+where
+    Publisher: Sized + MessagePublisher
+{
     fn to_sink(self) -> PublisherSink<Self> {
         PublisherSink {
             publisher:      Some(self),

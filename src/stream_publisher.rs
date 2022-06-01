@@ -41,8 +41,10 @@ where   Publisher:      MessagePublisher,
 }
 
 impl<'a, Publisher, SourceStream> Future for StreamPublisher<'a, Publisher, SourceStream>
-where   Publisher:      MessagePublisher,
-        SourceStream:   Stream<Item=Publisher::Message> {
+where
+    Publisher:      MessagePublisher,
+    SourceStream:   Stream<Item=Publisher::Message>,
+{
     type Output = ();
 
     fn poll(mut self: Pin<&mut Self>, context: &mut Context) -> Poll<()> {
@@ -112,7 +114,9 @@ pub trait SendStreamToPublisher : Sized+MessagePublisher {
 
 impl<T: Sized+MessagePublisher> SendStreamToPublisher for T {
     fn send_all<'a, SourceStream>(&'a mut self, stream: SourceStream) -> StreamPublisher<'a, Self, SourceStream>
-    where SourceStream: 'a+Stream<Item=Self::Message> {
+    where
+        SourceStream: 'a + Stream<Item=Self::Message> 
+    {
         StreamPublisher::new(self, stream)
     }
 }

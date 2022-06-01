@@ -24,8 +24,9 @@ pub struct GeneratorStream<TFuture, TItem> {
 
 impl<'a, TFuture, TItem> GeneratorStream<TFuture, TItem> 
 where 
-TFuture:    'a+Future<Output=()>,
-TItem:      'a+Send {
+    TFuture:    'a + Future<Output=()>,
+    TItem:      'a + Send,
+{
     ///
     /// Creates a new generator stream
     ///
@@ -104,15 +105,17 @@ TItem:      'a+Send {
 ///
 pub fn generator_stream<'a, TItem, TFuture, TFutureFn: FnOnce(Box<dyn 'a+Send+Sync+Fn(TItem) -> BoxFuture<'static, ()>>) -> TFuture>(start_future: TFutureFn) -> impl Stream<Item=TItem> 
 where 
-TItem:      'a+Send,
-TFuture:    'a+Future<Output=()> {
+    TItem:      'a + Send,
+    TFuture:    'a + Future<Output=()>,
+{
     GeneratorStream::generate(start_future)
 }
 
 impl<TFuture, TItem> Stream for GeneratorStream<TFuture, TItem>
 where 
-TItem:      Send,
-TFuture:    Future<Output=()> {
+    TItem:      Send,
+    TFuture:    Future<Output=()>
+{
     type Item = TItem;
 
     fn poll_next(mut self: Pin<&mut Self>, context: &mut task::Context) -> Poll<Option<Self::Item>> {

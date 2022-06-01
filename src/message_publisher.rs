@@ -21,7 +21,9 @@ pub struct MessageSender<Message> {
 /// Trait that provides functions for publishing messages to subscribers
 /// 
 pub trait MessagePublisher
-where   Self:       Send {
+where   
+    Self: Send 
+{
     type Message: 'static+Send;
 
     ///
@@ -69,8 +71,10 @@ impl<Message> MessageSender<Message> {
     /// Creates a new message sender that will perform the supplied actions when the message is sent
     ///
     pub fn new<TSendMsg, TCancelSend>(send_msg: TSendMsg, cancel_send: TCancelSend) -> MessageSender<Message>
-    where   TSendMsg:       'static+Send+FnOnce(Message) -> (),
-            TCancelSend:    'static+Send+FnOnce() -> () {
+    where
+        TSendMsg:       'static+Send+FnOnce(Message) -> (),
+        TCancelSend:    'static+Send+FnOnce() -> (),
+    {
         MessageSender {
             send_message:   Some(Box::new(send_msg)),
             cancel_send:    Some(Box::new(cancel_send)),

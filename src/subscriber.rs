@@ -1,4 +1,5 @@
 use super::pubsub_core::*;
+use super::subscriber_handle::*;
 
 use futures::*;
 use futures::task;
@@ -6,6 +7,7 @@ use futures::task::{Poll};
 
 use std::sync::*;
 use std::pin::{Pin};
+use std::collections::{HashMap};
 
 ///
 /// Represents a subscriber stream from a publisher sink
@@ -51,8 +53,7 @@ impl<Message: Clone> Subscriber<Message> {
                 let sub_core        = self.sub_core.lock().unwrap();
 
                 // Assign an ID
-                let new_id = pub_core.next_subscriber_id;
-                pub_core.next_subscriber_id += 1;
+                let new_id = SubscriberHandle::new();
 
                 // Generate a new core for the clone
                 let new_sub_core = SubCore {
@@ -60,7 +61,7 @@ impl<Message: Clone> Subscriber<Message> {
                     published:          true,
                     waiting:            sub_core.waiting.clone(),
                     reserved:           0,
-                    notify_waiting:     vec![],
+                    notify_waiting:     HashMap::new(),
                     notify_ready:       vec![],
                     notify_complete:    vec![]
                 };
@@ -83,11 +84,11 @@ impl<Message: Clone> Subscriber<Message> {
 
             // Create the new core (no publisher)
             let new_sub_core = SubCore {
-                id:                 0,
+                id:                 SubscriberHandle::new(),
                 published:          false,
                 waiting:            sub_core.waiting.clone(),
                 reserved:           0,
-                notify_waiting:     vec![],
+                notify_waiting:     HashMap::new(),
                 notify_ready:       vec![],
                 notify_complete:    vec![]
             };
@@ -141,6 +142,7 @@ impl<Message> Stream for Subscriber<Message> {
         let (result, notify_ready, notify_complete) = {
             // Try to read a message from the waiting list
             let mut sub_core    = self.sub_core.lock().unwrap();
+            let handle          = sub_core.id;
             let next_message    = sub_core.waiting.pop_front();
 
             if let Some(next_message) = next_message {
@@ -161,7 +163,7 @@ impl<Message> Stream for Subscriber<Message> {
                 (Poll::Ready(None), vec![], vec![])
             } else {
                 // If the publisher is still alive and there are no messages available, store notification and carry on
-                sub_core.notify_waiting.push(context.waker().clone());
+                sub_core.notify_waiting.insert(handle, context.waker().clone());
 
                 // If anything is waiting for this subscriber to become ready, make sure it's notified
                 let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();

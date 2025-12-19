@@ -1,6 +1,7 @@
 use super::subscriber::*;
 use super::pubsub_core::*;
 use super::message_publisher::*;
+use super::subscriber_handle::*;
 
 use futures::future::{BoxFuture};
 
@@ -39,7 +40,6 @@ impl<Message: Clone> ExpiringPublisher<Message> {
     pub fn new(buffer_size: usize) -> ExpiringPublisher<Message> {
         // Create the core
         let core = PubCore {
-            next_subscriber_id: 0,
             publisher_count:    1,
             subscribers:        HashMap::new(),
             notify_closed:      HashMap::new(),
@@ -82,13 +82,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for ExpiringPublisher<Message
     /// 
     fn subscribe(&mut self) -> Subscriber<Message> {
         // Assign a subscriber ID
-        let subscriber_id = {
-            let mut core    = self.core.lock().unwrap();
-            let id          = core.next_subscriber_id;
-            core.next_subscriber_id += 1;
-
-            id
-        };
+        let subscriber_id = SubscriberHandle::new();
 
         // Create the subscriber core
         let sub_core = SubCore {
@@ -96,7 +90,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for ExpiringPublisher<Message
             published:          true,
             waiting:            VecDeque::new(),
             reserved:           0,
-            notify_waiting:     vec![],
+            notify_waiting:     HashMap::new(),
             notify_ready:       vec![],
             notify_complete:    vec![]
         };
@@ -168,7 +162,7 @@ impl<Message> Drop for ExpiringPublisher<Message> {
                     subscriber.notify_ready = vec![];
 
                     // Add to the things to notify once the lock is released
-                    to_notify.extend(subscriber.notify_waiting.drain(..));
+                    to_notify.extend(subscriber.notify_waiting.drain().map(|(_, waker)| waker));
                 }
 
                 // Return the notifications outside of the lock

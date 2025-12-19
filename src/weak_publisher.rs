@@ -1,12 +1,13 @@
 use super::subscriber::*;
 use super::pubsub_core::*;
 use super::message_publisher::*;
+use super::subscriber_handle::*;
 
 use futures::future;
 use futures::future::{BoxFuture};
 
 use std::sync::*;
-use std::collections::{VecDeque};
+use std::collections::{VecDeque, HashMap};
 
 ///
 /// A weak publisher republishes a `Publisher` only so long as that `Publisher` exists.
@@ -56,13 +57,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
 
         if let Some(core) = core {
             // Assign a subscriber ID
-            let subscriber_id = {
-                let mut core    = core.lock().unwrap();
-                let id          = core.next_subscriber_id;
-                core.next_subscriber_id += 1;
-
-                id
-            };
+            let subscriber_id = SubscriberHandle::new();
 
             // Create the subscriber core
             let sub_core = SubCore {
@@ -70,7 +65,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
                 published:          true,
                 waiting:            VecDeque::new(),
                 reserved:           0,
-                notify_waiting:     vec![],
+                notify_waiting:     HashMap::new(),
                 notify_ready:       vec![],
                 notify_complete:    vec![]
             };
@@ -90,11 +85,11 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
         } else {
             // Create a subscriber that is already closed
             let sub_core = SubCore {
-                id:                 0,
+                id:                 SubscriberHandle::new(),
                 published:          true,
                 waiting:            VecDeque::new(),
                 reserved:           0,
-                notify_waiting:     vec![],
+                notify_waiting:     HashMap::new(),
                 notify_ready:       vec![],
                 notify_complete:    vec![]
             };

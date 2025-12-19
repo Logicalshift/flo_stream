@@ -1,4 +1,5 @@
 use super::message_publisher::*;
+use super::subscriber_handle::*;
 
 use futures::future;
 use futures::future::{Future};
@@ -16,14 +17,11 @@ pub (super) struct PubCore<Message> {
     /// The number of publishers using this core
     pub publisher_count: usize,
 
-    /// The next ID to assign to a new subscriber
-    pub next_subscriber_id: usize,
-
     /// The subscribers to this publisher
-    pub subscribers: HashMap<usize, Arc<Mutex<SubCore<Message>>>>,
+    pub subscribers: HashMap<SubscriberHandle, Arc<Mutex<SubCore<Message>>>>,
 
     /// The IDs of subscribers waiting to be sent messages (used when publishing to single subscribers, to ensure that we don't just fill the queue of the first subscriber)
-    pub waiting: Vec<usize>,
+    pub waiting: Vec<SubscriberHandle>,
 
     /// The maximum size of queue to allow in any one subscriber
     pub max_queue_size: usize,
@@ -37,7 +35,7 @@ pub (super) struct PubCore<Message> {
 /// 
 pub (super) struct SubCore<Message> {
     /// Unique ID for the subscriber represented by this core
-    pub id: usize,
+    pub id: SubscriberHandle,
 
     /// True while the publisher owning this core is alive
     pub published: bool,
@@ -49,7 +47,7 @@ pub (super) struct SubCore<Message> {
     pub waiting: VecDeque<Message>,
 
     /// Notification tasks for when the 'waiting' queue becomes non-empty
-    pub notify_waiting: Vec<Waker>,
+    pub notify_waiting: HashMap<SubscriberHandle, Waker>,
 
     /// If the publisher is waiting on this subscriber, this is the notification to send
     pub notify_ready: Vec<Waker>,
@@ -94,7 +92,7 @@ impl<Message> SubCore<Message> {
             sub_core.waiting.push_back(message);
 
             // Wake anything that was waiting for a new message
-            sub_core.notify_waiting.drain(..).collect::<SmallVec<[_; 8]>>()
+            sub_core.notify_waiting.drain().map(|(_, waker)| waker).collect::<SmallVec<[_; 8]>>()
         };
 
         // Notify all of the wakers
@@ -114,7 +112,7 @@ impl<Message: Clone> SubCore<Message> {
             sub_core.waiting.push_back(message.clone());
 
             // Wake anything that was waiting for a new message
-            sub_core.notify_waiting.drain(..).collect::<SmallVec<[_; 8]>>()
+            sub_core.notify_waiting.drain().map(|(_, waker)| waker).collect::<SmallVec<[_; 8]>>()
         };
 
         // Result is the list of wakers to be notified
@@ -304,6 +302,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
     pub fn send_all_expiring_oldest(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
         let core                = Arc::clone(arc_self);
         let mut reserved_ids    = HashSet::new();
+        let subscriber_handle   = SubscriberHandle::new();
 
         future::poll_fn(move |context| {
             // Lock the core and all of the subscribers
@@ -323,7 +322,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
                         // The queue is full of messages that have not been generated yet. We need to wait for it to become ready or for a
                         // waiting item to be pushed.
                         sub_core.notify_ready.push(context.waker().clone());
-                        sub_core.notify_waiting.push(context.waker().clone());
+                        sub_core.notify_waiting.insert(subscriber_handle, context.waker().clone());
                         return Poll::Pending;
                     } else if sub_core.queue_size() >= pub_core.max_queue_size {
                         // The queue is full but we can discard a message

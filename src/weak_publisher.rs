@@ -66,7 +66,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
                 waiting:            VecDeque::new(),
                 reserved:           0,
                 notify_waiting:     HashMap::new(),
-                notify_ready:       vec![],
+                notify_ready:       HashMap::new(),
                 notify_complete:    vec![]
             };
 
@@ -90,7 +90,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
                 waiting:            VecDeque::new(),
                 reserved:           0,
                 notify_waiting:     HashMap::new(),
-                notify_ready:       vec![],
+                notify_ready:       HashMap::new(),
                 notify_complete:    vec![]
             };
 

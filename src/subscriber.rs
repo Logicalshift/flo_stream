@@ -62,7 +62,7 @@ impl<Message: Clone> Subscriber<Message> {
                     waiting:            sub_core.waiting.clone(),
                     reserved:           0,
                     notify_waiting:     HashMap::new(),
-                    notify_ready:       vec![],
+                    notify_ready:       HashMap::new(),
                     notify_complete:    vec![]
                 };
                 let new_sub_core = Arc::new(Mutex::new(new_sub_core));
@@ -89,7 +89,7 @@ impl<Message: Clone> Subscriber<Message> {
                 waiting:            sub_core.waiting.clone(),
                 reserved:           0,
                 notify_waiting:     HashMap::new(),
-                notify_ready:       vec![],
+                notify_ready:       HashMap::new(),
                 notify_complete:    vec![]
             };
 
@@ -117,13 +117,13 @@ impl<Message> Drop for Subscriber<Message> {
                 pub_core.subscribers.remove(&sub_core.id);
 
                 // Need to notify the core if it's waiting on this subscriber (might now be unblocked)
-                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_ready    = sub_core.notify_ready.drain().map(|(_, waker)| waker).collect::<Vec<_>>();
                 let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>(); 
                 (notify_ready, notify_complete)
             } else {
                 // Need to notify the core if it's waiting on this subscriber (might now be unblocked)
                 let mut sub_core = self.sub_core.lock().unwrap();
-                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_ready    = sub_core.notify_ready.drain().map(|(_, waker)| waker).collect::<Vec<_>>();
                 let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>(); 
                 (notify_ready, notify_complete)
             }
@@ -154,7 +154,7 @@ impl<Message> Stream for Subscriber<Message> {
                 };
 
                 // If something is waiting for this subscriber to become ready, then notify it as well
-                let notify_ready = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_ready = sub_core.notify_ready.drain().map(|(_, waker)| waker).collect::<Vec<_>>();
 
                 // Return the next message if it's available
                 (Poll::Ready(Some(next_message)), notify_ready, notify_complete)
@@ -166,7 +166,7 @@ impl<Message> Stream for Subscriber<Message> {
                 sub_core.notify_waiting.insert(handle, context.waker().clone());
 
                 // If anything is waiting for this subscriber to become ready, make sure it's notified
-                let notify_ready    = sub_core.notify_ready.drain(..).collect::<Vec<_>>();
+                let notify_ready    = sub_core.notify_ready.drain().map(|(_, waker)| waker).collect::<Vec<_>>();
                 let notify_complete = sub_core.notify_complete.drain(..).collect::<Vec<_>>();
 
                 (Poll::Pending, notify_ready, notify_complete)

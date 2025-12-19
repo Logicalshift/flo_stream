@@ -91,7 +91,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for ExpiringPublisher<Message
             waiting:            VecDeque::new(),
             reserved:           0,
             notify_waiting:     HashMap::new(),
-            notify_ready:       vec![],
+            notify_ready:       HashMap::new(),
             notify_complete:    vec![]
         };
 
@@ -159,7 +159,7 @@ impl<Message> Drop for ExpiringPublisher<Message> {
 
                     // Unpublish the subscriber (so that it hits the end of the stream)
                     subscriber.published    = false;
-                    subscriber.notify_ready = vec![];
+                    subscriber.notify_ready = HashMap::new();
 
                     // Add to the things to notify once the lock is released
                     to_notify.extend(subscriber.notify_waiting.drain().map(|(_, waker)| waker));

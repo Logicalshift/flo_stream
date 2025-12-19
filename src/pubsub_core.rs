@@ -50,7 +50,7 @@ pub (super) struct SubCore<Message> {
     pub notify_waiting: HashMap<SubscriberHandle, Waker>,
 
     /// If the publisher is waiting on this subscriber, this is the notification to send
-    pub notify_ready: Vec<Waker>,
+    pub notify_ready: HashMap<SubscriberHandle, Waker>,
 
     /// If the publisher is waiting for this subscriber to complete, this is the notification to send
     pub notify_complete: Vec<Waker>,
@@ -74,7 +74,7 @@ impl<Message> SubCore<Message> {
             sub_core.reserved   -= 1;
 
             // Wake anything that was waiting for a new message
-            sub_core.notify_ready.drain(..).collect::<SmallVec<[_; 8]>>()
+            sub_core.notify_ready.drain().map(|(_, waker)| waker).collect::<SmallVec<[_; 8]>>()
         };
 
         // Notify anything that was waiting for this subscriber to become ready
@@ -166,7 +166,8 @@ impl<Message: 'static+Send> PubCore<Message> {
     /// Waits for a subscriber to become available and returns a future message sender that will post to that subscriber
     ///
     pub fn send_single_subscriber(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
-        let core = Arc::clone(arc_self);
+        let core    = Arc::clone(arc_self);
+        let handle  = SubscriberHandle::new();
 
         future::poll_fn(move |context| {
             // Lock the core and all of the subscribers
@@ -188,7 +189,7 @@ impl<Message: 'static+Send> PubCore<Message> {
 
                     // Notify when the subscriber queue becomes empty
                     for (_id, subcore) in core.subscribers.iter() {
-                        subcore.lock().unwrap().notify_ready.push(context.waker().clone());
+                        subcore.lock().unwrap().notify_ready.insert(handle, context.waker().clone());
                     }
 
                     // Wake when a subscriber is available
@@ -202,7 +203,8 @@ impl<Message: 'static+Send> PubCore<Message> {
     /// Returns a future that will return when all of the subscribers have no data left to process
     ///
     pub fn when_empty(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=()>+Send {
-        let core                = Arc::clone(arc_self);
+        let core    = Arc::clone(arc_self);
+        let handle  = SubscriberHandle::new();
 
         future::poll_fn(move |context| {
             // Lock the core and all of the subscribers
@@ -218,7 +220,7 @@ impl<Message: 'static+Send> PubCore<Message> {
             for (_id, _subscriber, sub_core) in subscribers.iter_mut() {
                 if sub_core.queue_size() > 0 {
                     // Wake when this subscriber becomes ready to check again
-                    sub_core.notify_ready.push(context.waker().clone());
+                    sub_core.notify_ready.insert(handle, context.waker().clone());
 
                     // Wait for this subscriber to empty
                     return Poll::Pending;
@@ -239,6 +241,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
     pub fn send_all_subscribers(arc_self: &Arc<Mutex<PubCore<Message>>>) -> impl Future<Output=MessageSender<Message>>+Send {
         let core                = Arc::clone(arc_self);
         let mut reserved_ids    = HashSet::new();
+        let handle              = SubscriberHandle::new();
 
         future::poll_fn(move |context| {
             // Lock the core and all of the subscribers
@@ -256,7 +259,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
                     // We haven't already reserved a slot in this queue
                     if sub_core.queue_size() >= pub_core.max_queue_size {
                         // The queue is full: we need to wait for this subscriber to have a slot ready
-                        sub_core.notify_ready.push(context.waker().clone());
+                        sub_core.notify_ready.insert(handle, context.waker().clone());
                         return Poll::Pending;
                     } else {
                         // This subscriber has a slot available: reserve it for us
@@ -321,7 +324,7 @@ impl<Message: 'static+Send+Clone> PubCore<Message> {
                     if sub_core.queue_size() >= pub_core.max_queue_size && sub_core.waiting.len() == 0 {
                         // The queue is full of messages that have not been generated yet. We need to wait for it to become ready or for a
                         // waiting item to be pushed.
-                        sub_core.notify_ready.push(context.waker().clone());
+                        sub_core.notify_ready.insert(subscriber_handle, context.waker().clone());
                         sub_core.notify_waiting.insert(subscriber_handle, context.waker().clone());
                         return Poll::Pending;
                     } else if sub_core.queue_size() >= pub_core.max_queue_size {

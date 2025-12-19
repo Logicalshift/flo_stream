@@ -51,9 +51,6 @@ pub (super) struct SubCore<Message> {
 
     /// If the publisher is waiting on this subscriber, this is the notification to send
     pub notify_ready: HashMap<SubscriberHandle, Waker>,
-
-    /// If the publisher is waiting for this subscriber to complete, this is the notification to send
-    pub notify_complete: HashMap<SubscriberHandle, Waker>,
 }
 
 impl<Message> SubCore<Message> {

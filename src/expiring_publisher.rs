@@ -92,7 +92,6 @@ impl<Message: 'static+Send+Clone> MessagePublisher for ExpiringPublisher<Message
             reserved:           0,
             notify_waiting:     HashMap::new(),
             notify_ready:       HashMap::new(),
-            notify_complete:    HashMap::new(),
         };
 
         // The new subscriber needs a reference to the sub_core and the pub_core

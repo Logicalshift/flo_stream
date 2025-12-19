@@ -56,6 +56,7 @@ mod stream_publisher;
 mod weak_publisher;
 mod generator;
 mod switching_stream;
+mod subscriber_handle;
 
 pub use self::message_publisher::*;
 pub use self::publisher::*;

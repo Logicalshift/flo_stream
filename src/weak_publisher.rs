@@ -67,7 +67,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
                 reserved:           0,
                 notify_waiting:     HashMap::new(),
                 notify_ready:       HashMap::new(),
-                notify_complete:    vec![]
+                notify_complete:    HashMap::new(),
             };
 
             // The new subscriber needs a reference to the sub_core and the pub_core
@@ -91,7 +91,7 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
                 reserved:           0,
                 notify_waiting:     HashMap::new(),
                 notify_ready:       HashMap::new(),
-                notify_complete:    vec![]
+                notify_complete:    HashMap::new(),
             };
 
             Subscriber::new(Weak::default(), Arc::new(Mutex::new(sub_core)))

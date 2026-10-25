@@ -15,6 +15,23 @@ enum SyncAsyncWaker {
 }
 
 ///
+/// A slot in the SyncAsyncChannel
+///
+enum Slot<TMessage> {
+    /// Unused slot
+    Empty,
+
+    /// Reserved slot (pending being filled)
+    Reserved,
+
+    /// Released slot (won't be filled)
+    Released,
+
+    /// Slot with a message available
+    Full(TMessage),
+}
+
+///
 /// The core of a sync/async channel
 ///
 struct SyncAsyncCore<TMessage> {
@@ -22,7 +39,7 @@ struct SyncAsyncCore<TMessage> {
     recv_waker:         Option<SyncAsyncWaker>,
 
     /// Slots for waiting messages (plus one extra as the 'full marker')
-    waiting:            Vec<Option<TMessage>>,
+    waiting:            Vec<Slot<TMessage>>,
 
     /// Index of the next message to deliver
     read_idx:           usize,
@@ -66,6 +83,21 @@ pub struct RecvSyncAsync<TMessage> {
     core: Arc<Mutex<SyncAsyncCore<TMessage>>>,
 }
 
+impl<TMessage> Slot<TMessage> {
+    ///
+    /// Takes the value from this slot
+    ///
+    #[inline]
+    fn take(&mut self) -> Slot<TMessage> {
+        use std::mem;
+
+        match self {
+            Slot::Reserved  => mem::replace(self, Slot::Reserved),
+            _               => mem::replace(self, Slot::Empty),
+        }
+    }
+}
+
 impl<TMessage> SyncAsyncCore<TMessage> {
     ///
     /// Stores a message in this core (or bounces it back if there's no space)
@@ -81,7 +113,7 @@ impl<TMessage> SyncAsyncCore<TMessage> {
             Err(msg)
         } else {
             // Store this message and update the write position
-            self.waiting[self.write_idx] = Some(msg);
+            self.waiting[self.write_idx] = Slot::Full(msg);
             self.write_idx = next_write_idx;
 
             Ok(())
@@ -103,6 +135,8 @@ impl<TMessage> SyncAsyncCore<TMessage> {
             let write_idx = self.write_idx;
             self.write_idx = next_write_idx;
 
+            self.waiting[write_idx] = Slot::Reserved;
+
             Ok(write_idx)
         }
     }
@@ -112,17 +146,36 @@ impl<TMessage> SyncAsyncCore<TMessage> {
     ///
     #[inline]
     fn dequeue(&mut self) -> Result<TMessage, ()> {
-        if let Some(msg) = self.waiting[self.read_idx].take() {
-            // Value waiting in the queue
-            let next_read_idx = self.read_idx + 1;
-            let next_read_idx = if next_read_idx >= self.waiting.len() { 0 } else { next_read_idx };
+        loop {
+            match self.waiting[self.read_idx].take() {
+                Slot::Full(msg) => {
+                    // Value waiting in the queue
+                    let next_read_idx = self.read_idx + 1;
+                    let next_read_idx = if next_read_idx >= self.waiting.len() { 0 } else { next_read_idx };
 
-            self.read_idx = next_read_idx;
+                    self.read_idx = next_read_idx;
 
-            Ok(msg)
-        } else {
-            // At the end of the queue or value not ready yet
-            Err(())
+                    return Ok(msg)
+                }
+
+                Slot::Reserved => { 
+                    // Slot waiting to be filled
+                    return Err(()) 
+                }
+
+                Slot::Empty => {
+                    // Slot not in use
+                    return Err(())
+                }
+
+                Slot::Released => {
+                    // Slot was reserved but never received a value: skip and try again
+                    let next_read_idx = self.read_idx + 1;
+                    let next_read_idx = if next_read_idx >= self.waiting.len() { 0 } else { next_read_idx };
+
+                    self.read_idx = next_read_idx;
+                }
+            }
         }
     }
 
@@ -138,24 +191,8 @@ impl<TMessage> SyncAsyncCore<TMessage> {
     /// Removes a reserved write position from this channel
     ///
     fn unreserve(&mut self, idx: usize) {
-        let mut pos = idx;
-        let len     = self.waiting.len();
-
-        // Swap everything ahead of the reserved index to move them up
-        while pos != self.write_idx {
-            let next_pos = pos + 1;
-            let next_pos = if next_pos >= len { 0 } else { next_pos };
-
-            self.waiting.swap(pos, next_pos);
-            pos = next_pos;
-        }
-
-        // Move the write position back one position
-        if self.write_idx == 0 {
-            self.write_idx = len - 1;
-        } else {
-            self.write_idx -= 1;
-        }
+        // Mark the slot as released, gets tidied up next receive
+        self.waiting[idx] = Slot::Released;
     }
 }
 
@@ -180,7 +217,7 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
         core.recv_waker = None;
         if core.max_waiting == 0 && core.waiting.len() == 1 {
             // 'Block until ready to receive' mode: unblock any waiting receivers
-            core.waiting.push(None);
+            core.waiting.push(Slot::Empty);
             let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
             drop(core);
 
@@ -255,7 +292,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
 
         // Store this item in the core
         let mut core = self.core.lock().unwrap();
-        core.waiting[write_idx] = Some(item);
+        core.waiting[write_idx] = Slot::Full(item);
 
         // Wake up any receivers
         let waker = core.recv_waker.take();
@@ -266,8 +303,10 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         Ok(())
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Err(())); }
+
+        self.unreserve();
 
         let mut core = self.core.lock().unwrap();
 
@@ -291,6 +330,8 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Ok(())); }
+
+        self.unreserve();
 
         // Poll for the core to be flushed
         let mut core = self.core.lock().unwrap();
@@ -334,7 +375,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
 
             if core.max_waiting == 0 && core.waiting.len() == 1 {
                 // 'Wait until ready to receive' mode: unblock the waiting list
-                core.waiting.push(None);
+                core.waiting.push(Slot::Empty);
                 let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
                 drop(core);
 
@@ -521,7 +562,7 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
 pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMessage>, RecvSyncAsync<TMessage>) {
     // Create an empty core
     let mut waiting = Vec::with_capacity(queue_len+1);
-    while waiting.len() <= queue_len { waiting.push(None); }
+    while waiting.len() <= queue_len { waiting.push(Slot::Empty); }
 
     let core = SyncAsyncCore {
         recv_waker:         None,

@@ -61,7 +61,7 @@ mod weak_publisher;
 mod generator;
 mod switching_stream;
 mod subscriber_handle;
-mod channel_to_async;
+mod sync_or_async_channel;
 
 pub use self::message_publisher::*;
 pub use self::publisher::*;
@@ -74,4 +74,4 @@ pub use self::stream_publisher::*;
 pub use self::weak_publisher::*;
 pub use self::generator::*;
 pub use self::switching_stream::*;
-pub use self::channel_to_async::*;
+pub use self::sync_or_async_channel::*;

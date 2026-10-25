@@ -448,7 +448,7 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
 /// Creates a MPSC channel that can be used either synchronously or asynchronously
 ///
 /// The queue length is the number of messages this will queue before blocking (0 creates
-/// a queue that will block until the message is received).
+/// a queue that will block until the message is ready to be received).
 ///
 /// This is useful with code that needs to interoperate between standard synchronous
 /// threads and futures. When in synchronous mode, backpressure is supplied by parking the

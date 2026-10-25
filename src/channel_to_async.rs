@@ -202,6 +202,7 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
             if core.max_waiting == 0 && core.waiting.len() > 1 {
                 core.waiting.pop();
                 core.write_idx = 0;
+                core.read_idx  = 0;
             }
 
             // Wake up anything waiting for a slot or for the stream to flush
@@ -352,6 +353,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
                     // 'Wait until ready to receive' mode: block the waiting list
                     core.waiting.pop();
                     core.write_idx = 0;
+                    core.read_idx  = 0;
                 }
 
                 if core.is_empty() {

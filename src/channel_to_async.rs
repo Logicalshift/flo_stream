@@ -170,7 +170,12 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         if core.waiting.is_empty() {
             // No more items waiting in the core: count this sender as closed
             core.closed_count += 1;
+
+            let waker = core.recv_waker.take();
             drop(core);
+
+            // Wake anything waiting to receive things
+            if let Some(waker) = waker { waker.wake(); }
 
             self.closed = true;
 
@@ -195,6 +200,8 @@ impl<TMessage> RecvSyncAsync<TMessage> {
     pub fn next_sync(&mut self) -> Option<TMessage> {
         loop {
             let mut core = self.core.lock().unwrap();
+
+            core.recv_waker = None;
 
             if let Some(next) = core.waiting.pop_front() {
                 // Deliver this message
@@ -230,7 +237,6 @@ impl<TMessage> SendSyncAsync<TMessage> {
     pub fn send_sync(&mut self, message: TMessage) {
         loop {
             let mut core = self.core.lock().unwrap();
-            core.recv_waker = None;
 
             if core.waiting.len() > core.max_waiting {
                 // Block until there's a free slot

@@ -56,7 +56,7 @@ pub struct SendSyncAsync<TMessage> {
     handle:     usize,
     closed:     bool,
     core:       Arc<Mutex<SyncAsyncCore<TMessage>>>,
-    write_idx:  usize,
+    write_idx:  Option<usize>,
 }
 
 ///
@@ -206,7 +206,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
             Poll::Ready(Err(()))
         } else if let Ok(write_idx) = core.reserve() {
             drop(core);
-            self.write_idx = write_idx;
+            self.write_idx = Some(write_idx);
 
             Poll::Ready(Ok(()))
         } else {
@@ -221,10 +221,12 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         }
     }
 
-    fn start_send(self: Pin<&mut Self>, item: TMessage) -> Result<(), Self::Error> {
+    fn start_send(mut self: Pin<&mut Self>, item: TMessage) -> Result<(), Self::Error> {
+        let Some(write_idx) = self.write_idx.take() else { return Err(()) };
+
         // Store this item in the core
         let mut core = self.core.lock().unwrap();
-        core.waiting[self.write_idx] = Some(item);
+        core.waiting[write_idx] = Some(item);
 
         // Wake up any receivers
         let waker = core.recv_waker.take();
@@ -439,7 +441,7 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
             handle:     handle, 
             closed:     self.closed, 
             core:       self.core.clone(),
-            write_idx:  0,
+            write_idx:  None,
         }
     }
 }
@@ -482,7 +484,7 @@ pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMess
     let sender = SendSyncAsync {
         handle:     0,
         closed:     false,
-        write_idx:  0,
+        write_idx:  None,
         core:       core.clone(),
     };
     let receiver = RecvSyncAsync {

@@ -62,7 +62,7 @@ struct SyncAsyncCore<TMessage> {
     /// Senders that are blocked waiting for the queue size to go down
     waiting_senders:    Vec<(usize, SyncAsyncWaker)>,
 
-    /// Things that are waiting for the 
+    /// Things that are waiting for the queue to become empty
     waiting_flushers:   Vec<(usize, SyncAsyncWaker)>,
 }
 

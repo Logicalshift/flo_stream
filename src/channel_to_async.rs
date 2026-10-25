@@ -264,13 +264,16 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Err(())); }
 
-        self.unreserve();
         let mut core = self.core.lock().unwrap();
 
         if core.receiver_closed {
             // Nothing receiving
             Poll::Ready(Err(()))
+        } else if self.write_idx.is_some() {
+            // Slot already reserved
+            Poll::Ready(Ok(()))
         } else if let Ok(write_idx) = core.reserve() {
+            // New slot available in the core
             drop(core);
             self.write_idx = Some(write_idx);
 

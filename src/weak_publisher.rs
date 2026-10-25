@@ -129,8 +129,11 @@ impl<Message: 'static+Send+Clone> MessagePublisher for WeakPublisher<Message> {
     ///
     /// Returns true if this publisher is closed (will not publish any further messages to its subscribers)
     ///
-    fn is_closed(&self) -> bool { 
-        self.core.upgrade().is_none()
+    fn is_closed(&self) -> bool {
+        // The core can briefly outlive the last publisher (eg, while the publisher is being dropped), so check the publisher count as well
+        self.core.upgrade()
+            .map(|core| core.lock().unwrap().publisher_count == 0)
+            .unwrap_or(true)
     }
 
     ///

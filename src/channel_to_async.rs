@@ -168,6 +168,7 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
             // If we're in 'block until ready to receive' mode, shrink the waiting list
             if core.max_waiting == 0 && core.waiting.len() > 1 {
                 core.waiting.pop();
+                core.write_idx = 0;
             }
 
             // Wake up anything waiting for a slot or for the stream to flush
@@ -215,8 +216,6 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     }
 
     fn start_send(self: Pin<&mut Self>, item: TMessage) -> Result<(), Self::Error> {
-        // TODO: have to mess around with reserved slots to avoid a race condition that can overfill the queue
-
         // Store this item in the core
         let mut core = self.core.lock().unwrap();
         core.waiting[self.write_idx] = Some(item);
@@ -310,6 +309,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
                 if core.max_waiting == 0 && core.waiting.len() > 1 {
                     // 'Wait until ready to receive' mode: block the waiting list
                     core.waiting.pop();
+                    core.write_idx = 0;
                 }
 
                 if core.is_empty() {

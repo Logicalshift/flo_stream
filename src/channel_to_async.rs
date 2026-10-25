@@ -152,8 +152,14 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
 
         core.recv_waker = None;
         if core.max_waiting == 0 && core.waiting.len() == 1 {
-            // 'Block until ready to receive' mode: unblock the waiting
+            // 'Block until ready to receive' mode: unblock any waiting receivers
             core.waiting.push(None);
+            let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+            drop(core);
+
+            for (_, waker) in wakers { waker.wake() }
+
+            core = self.core.lock().unwrap();
         }
 
         if let Ok(next) = core.dequeue() {
@@ -298,6 +304,12 @@ impl<TMessage> RecvSyncAsync<TMessage> {
             if core.max_waiting == 0 && core.waiting.len() == 1 {
                 // 'Wait until ready to receive' mode: unblock the waiting list
                 core.waiting.push(None);
+                let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                drop(core);
+
+                for (_, waker) in wakers { waker.wake() }
+
+                core = self.core.lock().unwrap();
             }
 
             core.recv_waker = None;

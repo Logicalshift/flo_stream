@@ -1,6 +1,7 @@
 use futures::prelude::*;
 use futures::task::{Waker, Context, Poll};
 
+use std::collections::*;
 use std::thread;
 use std::thread::{Thread};
 use std::sync::*;
@@ -60,7 +61,7 @@ struct SyncAsyncCore<TMessage> {
     closed_count:       usize,
 
     /// Senders that are blocked waiting for the queue size to go down
-    waiting_senders:    Vec<(usize, SyncAsyncWaker)>,
+    waiting_senders:    VecDeque<(usize, SyncAsyncWaker)>,
 
     /// Things that are waiting for the queue to become empty
     waiting_flushers:   Vec<(usize, SyncAsyncWaker)>,
@@ -227,9 +228,9 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
 
         core.recv_waker = None;
         if core.max_waiting == 0 && core.waiting.len() == 1 {
-            // 'Block until ready to receive' mode: unblock any waiting receivers
+            // 'Block until ready to receive' mode: unblock a waiting receiver
             core.waiting.push(Slot::Empty);
-            let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+            let wakers = core.waiting_senders.pop_front().into_iter().collect::<Vec<_>>();
             drop(core);
 
             for (_, waker) in wakers { waker.wake() }
@@ -239,7 +240,7 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
 
         if let Ok(next) = core.dequeue() {
             // There's a value waiting
-            let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+            let mut wakers = core.waiting_senders.pop_front().into_iter().collect::<Vec<_>>();
 
             if core.is_empty() {
                 // Nothing waiting to be sent: wake up anything waiting on a flush
@@ -265,9 +266,9 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
             // Retry when we're woken up
             core.recv_waker = Some(SyncAsyncWaker::Asynchronous(cx.waker().clone()));
 
-            // Wake up a sender if one is waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
+            // Wake up the senders if any are waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
             if !core.is_full() {
-                let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                let mut wakers = core.waiting_senders.drain(..).into_iter().collect::<Vec<_>>();
                 if core.is_empty() {
                     wakers.extend(core.waiting_flushers.drain(..));
                 }
@@ -314,7 +315,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
             if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                 *waker = SyncAsyncWaker::Asynchronous(cx.waker().clone());
             } else {
-                core.waiting_senders.push((self.handle, SyncAsyncWaker::Asynchronous(cx.waker().clone())));
+                core.waiting_senders.push_back((self.handle, SyncAsyncWaker::Asynchronous(cx.waker().clone())));
             }
 
             Poll::Pending
@@ -410,7 +411,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
             if core.max_waiting == 0 && core.waiting.len() == 1 {
                 // 'Wait until ready to receive' mode: unblock the waiting list
                 core.waiting.push(Slot::Empty);
-                let wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                let wakers = core.waiting_senders.pop_front().into_iter().collect::<Vec<_>>();
                 drop(core);
 
                 for (_, waker) in wakers { waker.wake() }
@@ -422,7 +423,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
 
             if let Ok(next) = core.dequeue() {
                 // Deliver this message
-                let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                let mut wakers = core.waiting_senders.pop_front().into_iter().collect::<Vec<_>>();
 
                 if core.max_waiting == 0 && core.waiting.len() > 1 {
                     // 'Wait until ready to receive' mode: block the waiting list
@@ -447,7 +448,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
                 // Block until something sends a message on a different thread
                 core.recv_waker = Some(SyncAsyncWaker::Synchronous(thread::current()));
 
-                // Wake up a sender if one is waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
+                // Wake up the senders if any are waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
                 if !core.is_full() {
                     let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
                     if core.is_empty() {
@@ -477,13 +478,8 @@ impl<TMessage> SendSyncAsync<TMessage> {
             // Unreserve the write index
             core.unreserve(write_idx);
 
-            // Wake up anything that might want the freed slot
-            let mut wakers = core.waiting_senders.drain(..).map(|(_, waker)| waker).collect::<Vec<_>>();
-            wakers.extend(core.recv_waker.take());
-            if core.is_empty() {
-                wakers.extend(core.waiting_flushers.drain(..).map(|(_, waker)| waker));
-            }
-
+            // Wake up the receiver so it can flush the released slot
+            let wakers = core.recv_waker.take().into_iter().collect::<Vec<_>>();
             drop(core);
 
             for waker in wakers { waker.wake(); }
@@ -515,7 +511,7 @@ impl<TMessage> SendSyncAsync<TMessage> {
                 if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                     *waker = SyncAsyncWaker::Synchronous(thread::current())
                 } else {
-                    core.waiting_senders.push((self.handle, SyncAsyncWaker::Synchronous(thread::current())));
+                    core.waiting_senders.push_back((self.handle, SyncAsyncWaker::Synchronous(thread::current())));
                 }
                 drop(core);
 
@@ -618,7 +614,7 @@ pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMess
         max_waiting:        queue_len,
         next_sender_handle: 1,
         closed_count:       0,
-        waiting_senders:    vec![],
+        waiting_senders:    VecDeque::new(),
         waiting_flushers:   vec![],
         receiver_closed:    false,
     };

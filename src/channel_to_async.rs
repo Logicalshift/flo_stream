@@ -18,7 +18,7 @@ enum SyncAsyncWaker {
 /// The core of a sync/async channel
 ///
 struct SyncAsyncCore<TMessage> {
-    /// Used to wake this core when the thread is being waited on multiple times
+    /// Wakes the receiver, if it's waiting for a message to send
     recv_waker:         Option<SyncAsyncWaker>,
 
     /// Slots for waiting messages (plus one extra as the 'full marker')
@@ -349,7 +349,7 @@ impl<TMessage> RecvSyncAsync<TMessage> {
 
 impl<TMessage> SendSyncAsync<TMessage> {
     ///
-    /// Reads the next message from this queue (blocking until one is sent)
+    /// Sends a message to the queue (blocking if the queue is full)
     ///
     pub fn send_sync(&mut self, message: TMessage) -> Result<(), ()> {
         if self.closed {

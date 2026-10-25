@@ -4,10 +4,13 @@ flo_stream = "0.8"
 
 # flo_stream
 
-`flo_stream` is a crate providing some extra utilities for streams in Rust's `futures` library. The primary new feature
-it provides is a "pubsub" mechanism - a way to subscribe to updates sent to a futures `Sink`. This differs from the
-`Sender`/`Receiver` mechanism provided in the main futures library in two key ways: it's possible to have multiple
-receivers, and messages sent when there is no subscriber connected will be ignored.
+`flo_stream` is a crate providing some new asynchronous streams for Rust. Its main features are:
+
+* PubSub, or multi-producer, multi-consumer streams: send a message to multiple receivers from multiple producers, with
+  some variants for sending to all subscribers or in a round-robin fashion.
+* Generator streams, a more ergonomic alternative to `unfold` where the state is too complicated to pass from call to call.
+* Synchronous/asynchronous MPSC channels, a way to send and receive data to a stream that can be used either from a
+  blocking thread or a non-blocking asynchronous future.
 
 ## PubSub
 

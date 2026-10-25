@@ -188,6 +188,17 @@ impl<TMessage> SyncAsyncCore<TMessage> {
     }
 
     ///
+    /// True if the waiting queue is full
+    ///
+    #[inline]
+    fn is_full(&self) -> bool {
+        let next_write_idx = self.write_idx + 1;
+        let next_write_idx = if next_write_idx >= self.waiting.len() { 0 } else { next_write_idx };
+
+        next_write_idx == self.read_idx
+    }
+
+    ///
     /// Removes a reserved write position from this channel
     ///
     fn unreserve(&mut self, idx: usize) {
@@ -253,6 +264,18 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
         } else {
             // Retry when we're woken up
             core.recv_waker = Some(SyncAsyncWaker::Asynchronous(cx.waker().clone()));
+
+            // Wake up a sender if one is waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
+            if !core.is_full() {
+                let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                if core.is_empty() {
+                    wakers.extend(core.waiting_flushers.drain(..));
+                }
+                drop(core);
+
+                for (_, waker) in wakers { waker.wake(); }
+            }
+
             Poll::Pending
         }
     }
@@ -416,7 +439,19 @@ impl<TMessage> RecvSyncAsync<TMessage> {
                 // Block until something sends a message on a different thread
                 core.recv_waker = Some(SyncAsyncWaker::Synchronous(thread::current()));
 
-                drop(core);
+                // Wake up a sender if one is waiting, as we're waiting for data (and if dequeue emptied the queue of released slots there could be new space)
+                if !core.is_full() {
+                    let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+                    if core.is_empty() {
+                        wakers.extend(core.waiting_flushers.drain(..));
+                    }
+                    drop(core);
+
+                    for (_, waker) in wakers { waker.wake(); }
+                } else {
+                    drop(core);
+                }
+
                 thread::park();
             }
         }

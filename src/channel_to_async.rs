@@ -278,6 +278,28 @@ impl<TMessage> Drop for SendSyncAsync<TMessage> {
     }
 }
 
+impl<TMessage> Clone for SendSyncAsync<TMessage> {
+    fn clone(&self) -> Self {
+        // Assign a new handle (keep closed if closed)
+        let mut core    = self.core.lock().unwrap();
+        let handle      = core.next_sender_handle;
+
+        core.next_sender_handle += 1;
+        if self.closed {
+            core.closed_count += 1;
+        }
+
+        drop(core);
+
+        // New sender
+        Self {
+            handle: handle, 
+            closed: self.closed, 
+            core:   self.core.clone(),
+        }
+    }
+}
+
 ///
 /// Creates a MPSC channel that can be used either synchronously or asynchronously
 ///

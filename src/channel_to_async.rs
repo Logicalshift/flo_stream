@@ -126,9 +126,36 @@ impl<TMessage> SyncAsyncCore<TMessage> {
         }
     }
 
+    ///
+    /// True if there are no waiting messages
+    ///
     #[inline]
     fn is_empty(&self) -> bool {
         self.write_idx == self.read_idx
+    }
+
+    ///
+    /// Removes a reserved write position from this channel
+    ///
+    fn unreserve(&mut self, idx: usize) {
+        let mut pos = idx;
+        let len     = self.waiting.len();
+
+        // Swap everything ahead of the reserved index to move them up
+        while pos != self.write_idx {
+            let next_pos = pos + 1;
+            let next_pos = if next_pos >= len { 0 } else { next_pos };
+
+            self.waiting.swap(pos, next_pos);
+            pos = next_pos;
+        }
+
+        // Move the write position back one position
+        if self.write_idx == 0 {
+            self.write_idx = len - 1;
+        } else {
+            self.write_idx -= 1;
+        }
     }
 }
 
@@ -199,6 +226,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Err(())); }
 
+        self.unreserve();
         let mut core = self.core.lock().unwrap();
 
         if core.receiver_closed {
@@ -351,6 +379,29 @@ impl<TMessage> RecvSyncAsync<TMessage> {
 
 impl<TMessage> SendSyncAsync<TMessage> {
     ///
+    /// If this has reserved a write index, then unreserve it
+    ///
+    fn unreserve(&mut self) {
+        if let Some(write_idx) = self.write_idx.take() {
+            let mut core = self.core.lock().unwrap();
+
+            // Unreserve the write index
+            core.unreserve(write_idx);
+
+            // Wake up anything that might want the freed slot
+            let mut wakers = core.waiting_senders.drain(..).map(|(_, waker)| waker).collect::<Vec<_>>();
+            wakers.extend(core.recv_waker.take());
+            if core.is_empty() {
+                wakers.extend(core.waiting_flushers.drain(..).map(|(_, waker)| waker));
+            }
+
+            drop(core);
+
+            for waker in wakers { waker.wake(); }
+        }
+    }
+
+    ///
     /// Sends a message to the queue (blocking if the queue is full)
     ///
     pub fn send_sync(&mut self, message: TMessage) -> Result<(), ()> {
@@ -358,6 +409,8 @@ impl<TMessage> SendSyncAsync<TMessage> {
             // Can't send on a closed stream
             return Err(())
         }
+
+        self.unreserve();
 
         let mut message = message;
         loop {
@@ -410,6 +463,8 @@ impl<TMessage> Drop for RecvSyncAsync<TMessage> {
 
 impl<TMessage> Drop for SendSyncAsync<TMessage> {
     fn drop(&mut self) {
+        self.unreserve();
+
         // Close off this sender
         let waker = if !self.closed {
             let mut core = self.core.lock().unwrap();

@@ -25,6 +25,9 @@ struct SyncAsyncCore<TMessage> {
     /// Undelivered messages that are waiting
     waiting:            VecDeque<TMessage>,
 
+    /// True if the receiver is closed
+    receiver_closed:    bool,
+
     /// Maximum number of messages to enqueue before blocking
     max_waiting:        usize,
 
@@ -110,7 +113,10 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
 
         let mut core = self.core.lock().unwrap();
 
-        if core.waiting.len() > core.max_waiting {
+        if core.receiver_closed {
+            // Nothing receiving
+            Poll::Ready(Err(()))
+        } else if core.waiting.len() > core.max_waiting {
             // Too many things queued: set a waker
             if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                 *waker = SyncAsyncWaker::Asynchronous(cx.waker().clone());
@@ -149,6 +155,9 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         if core.waiting.is_empty() {
             // No more items waiting in the core
             Poll::Ready(Ok(()))
+        } else if core.receiver_closed {
+            // Nothing receiving, but things waiting
+            Poll::Ready(Err(()))
         } else {
             // Wait for the recv stream to signal that all the messages have been delivered
             if let Some((_, waker)) = core.waiting_flushers.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
@@ -162,7 +171,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     }
 
     fn poll_close(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        if self.closed { return Poll::Ready(Err(())); }
+        if self.closed { return Poll::Ready(Ok(())); }
 
         // Poll for the core to be flushed
         let mut core = self.core.lock().unwrap();
@@ -180,6 +189,9 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
             self.closed = true;
 
             Poll::Ready(Ok(()))
+        } else if core.receiver_closed {
+            // Nothing receving, messages waiting
+            Poll::Ready(Err(()))
         } else {
             // Wait for the recv stream to signal that all the messages have been delivered
             if let Some((_, waker)) = core.waiting_flushers.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
@@ -234,11 +246,19 @@ impl<TMessage> SendSyncAsync<TMessage> {
     ///
     /// Reads the next message from this queue (blocking until one is sent)
     ///
-    pub fn send_sync(&mut self, message: TMessage) {
+    pub fn send_sync(&mut self, message: TMessage) -> Result<(), ()> {
+        if self.closed {
+            // Can't send on a closed stream
+            return Err(())
+        }
+
         loop {
             let mut core = self.core.lock().unwrap();
 
-            if core.waiting.len() > core.max_waiting {
+            if core.receiver_closed {
+                // Receiver no longer receiving
+                return Err(())
+            } else if core.waiting.len() > core.max_waiting {
                 // Block until there's a free slot
                 if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                     *waker = SyncAsyncWaker::Synchronous(thread::current())
@@ -257,9 +277,25 @@ impl<TMessage> SendSyncAsync<TMessage> {
                 // Wake up the receiver
                 if let Some(waker) = waker { waker.wake(); }
 
-                break;
+                return Ok(());
             }
         }
+    }
+}
+
+impl<TMessage> Drop for RecvSyncAsync<TMessage> {
+    fn drop(&mut self) {
+        let wakers = {
+            let mut core = self.core.lock().unwrap();
+            core.receiver_closed = true;
+
+            let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
+            wakers.extend(core.waiting_flushers.drain(..));
+
+            wakers
+        };
+
+        for (_, waker) in wakers { waker.wake() }
     }
 }
 
@@ -303,6 +339,9 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
 ///
 /// Creates a MPSC channel that can be used either synchronously or asynchronously
 ///
+/// The queue length is the number of messages this will queue before blocking (0 creates
+/// a queue that will block until the message is received).
+///
 /// This is useful with code that needs to interoperate between standard synchronous
 /// threads and futures. When in synchronous mode, backpressure is supplied by parking the
 /// thread and blocking. In asynchronous mode, backpressure is via the context's waker
@@ -322,6 +361,7 @@ pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMess
         closed_count:       0,
         waiting_senders:    vec![],
         waiting_flushers:   vec![],
+        receiver_closed:    false,
     };
     let core = Arc::new(Mutex::new(core));
 

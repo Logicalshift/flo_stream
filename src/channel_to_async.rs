@@ -284,6 +284,14 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
 impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     type Error = ();
 
+    ///
+    /// Note that if the send is cancelled after poll_ready indicates 'Ok', then a slot is
+    /// reserved for the value and won't be released until the value is actually sent with
+    /// 'start_send' or is cleared by calling 'poll_flush' (this is a consequence of the 
+    /// design of the 'Sink' trait).
+    ///
+    /// Once poll_ready returns, the ordering of the message is guaranteed.
+    ///
     fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Err(())); }
 

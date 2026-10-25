@@ -1,7 +1,6 @@
 use futures::prelude::*;
 use futures::task::{Waker, Context, Poll};
 
-use std::collections::*;
 use std::thread;
 use std::thread::{Thread};
 use std::sync::*;
@@ -22,8 +21,14 @@ struct SyncAsyncCore<TMessage> {
     /// Used to wake this core when the thread is being waited on multiple times
     recv_waker:         Option<SyncAsyncWaker>,
 
-    /// Undelivered messages that are waiting
-    waiting:            VecDeque<TMessage>,
+    /// Slots for waiting messages (plus one extra as the 'full marker')
+    waiting:            Vec<Option<TMessage>>,
+
+    /// Index of the next message to deliver
+    read_idx:           usize,
+
+    /// Index of the next message to write
+    write_idx:          usize,
 
     /// True if the receiver is closed
     receiver_closed:    bool,
@@ -48,9 +53,10 @@ struct SyncAsyncCore<TMessage> {
 /// A MPSC channel sender that can be used synchronously or asynchronously
 ///
 pub struct SendSyncAsync<TMessage> {
-    handle: usize,
-    closed: bool,
-    core:   Arc<Mutex<SyncAsyncCore<TMessage>>>,
+    handle:     usize,
+    closed:     bool,
+    core:       Arc<Mutex<SyncAsyncCore<TMessage>>>,
+    write_idx:  usize,
 }
 
 ///
@@ -58,6 +64,72 @@ pub struct SendSyncAsync<TMessage> {
 ///
 pub struct RecvSyncAsync<TMessage> {
     core: Arc<Mutex<SyncAsyncCore<TMessage>>>,
+}
+
+impl<TMessage> SyncAsyncCore<TMessage> {
+    ///
+    /// Stores a message in this core (or bounces it back if there's no space)
+    ///
+    #[inline]
+    fn enqueue(&mut self, msg: TMessage) -> Result<(), TMessage> {
+        // Get the write index we'll save after writing the current message
+        let next_write_idx = self.write_idx + 1;
+        let next_write_idx = if next_write_idx >= self.waiting.len() { 0 } else { next_write_idx };
+
+        if next_write_idx == self.read_idx {
+            // Next position has overrun
+            Err(msg)
+        } else {
+            // Store this message and update the write position
+            self.waiting[self.write_idx] = Some(msg);
+            self.write_idx = next_write_idx;
+
+            Ok(())
+        }
+    }
+
+    ///
+    /// Returns a write index without actually storing anything
+    ///
+    fn reserve(&mut self) -> Result<usize, ()> {
+        let next_write_idx = self.write_idx + 1;
+        let next_write_idx = if next_write_idx >= self.waiting.len() { 0 } else { next_write_idx };
+
+        if next_write_idx == self.read_idx {
+            // Next position has overrun
+            Err(())
+        } else {
+            // Store this message and update the write position
+            let write_idx = self.write_idx;
+            self.write_idx = next_write_idx;
+
+            Ok(write_idx)
+        }
+    }
+
+    ///
+    /// Dequeues a message from this core if there's one waiting
+    ///
+    #[inline]
+    fn dequeue(&mut self) -> Result<TMessage, ()> {
+        if let Some(msg) = self.waiting[self.read_idx].take() {
+            // Value waiting in the queue
+            let next_read_idx = self.read_idx + 1;
+            let next_read_idx = if next_read_idx >= self.waiting.len() { 0 } else { next_read_idx };
+
+            self.read_idx = next_read_idx;
+
+            Ok(msg)
+        } else {
+            // At the end of the queue or value not ready yet
+            Err(())
+        }
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.write_idx == self.read_idx
+    }
 }
 
 impl SyncAsyncWaker {
@@ -79,14 +151,23 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
         let mut core = self.core.lock().unwrap();
 
         core.recv_waker = None;
+        if core.max_waiting == 0 && core.waiting.len() == 1 {
+            // 'Block until ready to receive' mode: unblock the waiting
+            core.waiting.push(None);
+        }
 
-        if let Some(next) = core.waiting.pop_front() {
+        if let Ok(next) = core.dequeue() {
             // There's a value waiting
             let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
 
-            if core.waiting.is_empty() {
+            if core.is_empty() {
                 // Nothing waiting to be sent: wake up anything waiting on a flush
                 wakers.extend(core.waiting_flushers.drain(..));
+            }
+
+            // If we're in 'block until ready to receive' mode, shrink the waiting list
+            if core.max_waiting == 0 && core.waiting.len() > 1 {
+                core.waiting.pop();
             }
 
             // Wake up anything waiting for a slot or for the stream to flush
@@ -108,7 +189,7 @@ impl<TMessage> Stream for RecvSyncAsync<TMessage> {
 impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
     type Error = ();
 
-    fn poll_ready(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         if self.closed { return Poll::Ready(Err(())); }
 
         let mut core = self.core.lock().unwrap();
@@ -116,7 +197,12 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         if core.receiver_closed {
             // Nothing receiving
             Poll::Ready(Err(()))
-        } else if core.waiting.len() > core.max_waiting {
+        } else if let Ok(write_idx) = core.reserve() {
+            drop(core);
+            self.write_idx = write_idx;
+
+            Poll::Ready(Ok(()))
+        } else {
             // Too many things queued: set a waker
             if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                 *waker = SyncAsyncWaker::Asynchronous(cx.waker().clone());
@@ -125,9 +211,6 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
             }
 
             Poll::Pending
-        } else {
-            // There's a slot available
-            Poll::Ready(Ok(()))
         }
     }
 
@@ -136,7 +219,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
 
         // Store this item in the core
         let mut core = self.core.lock().unwrap();
-        core.waiting.push_back(item);
+        core.waiting[self.write_idx] = Some(item);
 
         // Wake up any receivers
         let waker = core.recv_waker.take();
@@ -152,7 +235,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
 
         let mut core = self.core.lock().unwrap();
 
-        if core.waiting.is_empty() {
+        if core.is_empty() {
             // No more items waiting in the core
             Poll::Ready(Ok(()))
         } else if core.receiver_closed {
@@ -176,7 +259,7 @@ impl<TMessage> Sink<TMessage> for SendSyncAsync<TMessage> {
         // Poll for the core to be flushed
         let mut core = self.core.lock().unwrap();
 
-        if core.waiting.is_empty() {
+        if core.is_empty() {
             // No more items waiting in the core: count this sender as closed
             core.closed_count += 1;
 
@@ -213,13 +296,23 @@ impl<TMessage> RecvSyncAsync<TMessage> {
         loop {
             let mut core = self.core.lock().unwrap();
 
+            if core.max_waiting == 0 && core.waiting.len() == 1 {
+                // 'Wait until ready to receive' mode: unblock the waiting list
+                core.waiting.push(None);
+            }
+
             core.recv_waker = None;
 
-            if let Some(next) = core.waiting.pop_front() {
+            if let Ok(next) = core.dequeue() {
                 // Deliver this message
                 let mut wakers = core.waiting_senders.drain(..).collect::<Vec<_>>();
 
-                if core.waiting.is_empty() {
+                if core.max_waiting == 0 && core.waiting.len() > 1 {
+                    // 'Wait until ready to receive' mode: block the waiting list
+                    core.waiting.pop();
+                }
+
+                if core.is_empty() {
                     wakers.extend(core.waiting_flushers.drain(..));
                 }
                 drop(core);
@@ -252,13 +345,16 @@ impl<TMessage> SendSyncAsync<TMessage> {
             return Err(())
         }
 
+        let mut message = message;
         loop {
             let mut core = self.core.lock().unwrap();
 
             if core.receiver_closed {
                 // Receiver no longer receiving
                 return Err(())
-            } else if core.waiting.len() > core.max_waiting {
+            } else if let Err(bounced_message) = core.enqueue(message) {
+                message = bounced_message;
+
                 // Block until there's a free slot
                 if let Some((_, waker)) = core.waiting_senders.iter_mut().filter(|(handle, _)| *handle == self.handle).next() {
                     *waker = SyncAsyncWaker::Synchronous(thread::current())
@@ -270,7 +366,6 @@ impl<TMessage> SendSyncAsync<TMessage> {
                 thread::park();
             } else {
                 // Send this message
-                core.waiting.push_back(message);
                 let waker = core.recv_waker.take();
                 drop(core);
 
@@ -329,9 +424,10 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
 
         // New sender
         Self {
-            handle: handle, 
-            closed: self.closed, 
-            core:   self.core.clone(),
+            handle:     handle, 
+            closed:     self.closed, 
+            core:       self.core.clone(),
+            write_idx:  0,
         }
     }
 }
@@ -353,9 +449,14 @@ impl<TMessage> Clone for SendSyncAsync<TMessage> {
 ///
 pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMessage>, RecvSyncAsync<TMessage>) {
     // Create an empty core
+    let mut waiting = Vec::with_capacity(queue_len+1);
+    while waiting.len() <= queue_len { waiting.push(None); }
+
     let core = SyncAsyncCore {
         recv_waker:         None,
-        waiting:            VecDeque::new(),
+        waiting:            waiting,
+        read_idx:           0,
+        write_idx:          0,
         max_waiting:        queue_len,
         next_sender_handle: 1,
         closed_count:       0,
@@ -367,9 +468,10 @@ pub fn channel_sync_or_async<TMessage>(queue_len: usize) -> (SendSyncAsync<TMess
 
     // Default sender gets handle 0
     let sender = SendSyncAsync {
-        handle: 0,
-        closed: false,
-        core:   core.clone()
+        handle:     0,
+        closed:     false,
+        write_idx:  0,
+        core:       core.clone(),
     };
     let receiver = RecvSyncAsync {
         core: core.clone()
